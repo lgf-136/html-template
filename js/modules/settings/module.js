@@ -891,6 +891,7 @@
     defaults: {},
     keys: {}, // providerId -> API Key
     catalog: [], // 内置供应商目录(/api/chat/providers)
+    prompts: [], // 提示词库(内置 + 自定义,来自 chat 配置)
     overrides: {}, // llm:overrides — providerId -> { temperature, topP, maxTokens }
     search: {}, // llm:search — { provider, results }
     providerModels: {}, // llm:providerModels — providerId -> 该供应商默认模型
@@ -1005,11 +1006,15 @@
       [2048, '2K (2,048)'], [4096, '4K (4,096)'], [8192, '8K (8,192)'],
       [16384, '16K (16,384)'], [32768, '32K (32,768)'], [65536, '64K (65,536)'],
       [131072, '128K (131,072)'], [262144, '256K (262,144)'], [393216, '384K (393,216)'],
+      [524288, '512K (524,288)'], [1048576, '1M (1,048,576)'], [2097152, '2M (2,097,152)'],
     ];
     var fetched = LLM.models[provider] || [];
     var modelOpts = fetched.map(function (m) {
       return llmOptItem('model:' + m, m, m === model);
     }).join('');
+    var prompts = LLM.prompts || [];
+    var promptName = '';
+    for (var pdi = 0; pdi < prompts.length; pdi++) if (prompts[pdi].content === prompt) promptName = prompts[pdi].name;
 
     function field(labelKey, inner, desc, valText) {
       return (
@@ -1027,10 +1032,13 @@
       field('llm.model',
         '<div class="sp-llm-modelrow">' +
         '<input class="sp-input" data-llm-field="model" value="' + escLlm(model) + '" placeholder="' + t('llm.model') + '">' +
+        '<div style="min-width:10rem">' +
+        llmSelectHtml(model || t('llm.chooseModel'),
+          (fetched.length ? modelOpts : '<div class="sp-llm-dd-empty">' + t('llm.fetchModelsHint') + '</div>')) +
+        '</div>' +
         '<button type="button" data-llm-fetch-models="' + escLlm(provider) + '" class="sp-llm-btn"' + (LLM.fetching[provider] ? ' disabled' : '') + '>' +
         (LLM.fetching[provider] ? t('llm.fetching') : t('llm.fetchModels')) + '</button>' +
-        '</div>' +
-        (fetched.length ? '<div class="sp-llm-modelrow" style="margin-top:0.375rem">' + llmSelectHtml(t('llm.chooseModel'), modelOpts) + '</div>' : '')) +
+        '</div>') +
       field('llm.temperature',
         spSliderHtml('temperature', 0, 2, 0.05, temp),
         '0(严谨) — 2(创意)',
@@ -1050,6 +1058,11 @@
         llmSelectHtml(thinking,
           ['none', 'low', 'medium', 'high', 'max'].map(function (v) { return llmOptItem('thinking:' + v, v, v === thinking); }).join(''))) +
       field('llm.systemPrompt',
+        '<div style="margin-bottom:0.375rem">' +
+        llmSelectHtml(promptName || t('llm.promptPickPh'),
+          llmOptItem('promptpick:', t('llm.promptDefault'), !prompt) +
+          prompts.map(function (pr) { return llmOptItem('promptpick:' + pr.id, pr.name, pr.content === prompt); }).join('')) +
+        '</div>' +
         '<textarea class="sp-textarea" data-llm-field="prompt" rows="4" placeholder="' + t('llm.systemPromptPh') + '">' + escLlm(prompt) + '</textarea>',
         t('llm.systemPromptHint')) +
       '</div>' +
@@ -1427,11 +1440,16 @@
         LLM.search = llmParseObj(raw['llm:search']);
         LLM.providerModels = llmParseObj(raw['llm:providerModels']);
         LLM.models = llmParseObj(raw['llm:models']);
+        return App.api.get('/api/chat/state');
+      })
+      .then(function (cs) {
+        LLM.prompts = (cs && cs.config && Array.isArray(cs.config.prompts)) ? cs.config.prompts : [];
         LLM.loaded = true;
         LLM.error = null;
         renderLlmPage();
       })
       .catch(function (e) {
+        LLM.prompts = LLM.prompts || [];
         LLM.loaded = true;
         LLM.error = (e && e.message) || '加载失败';
         renderLlmPage();
@@ -1933,6 +1951,14 @@
       } else if (kind === 'thinking') {
         llmSyncDefaultsFromDom();
         LLM.defaults.thinking = parts[0];
+        renderLlmPage();
+      } else if (kind === 'promptpick') {
+        var ppv = parts.join(':');
+        var pp = null;
+        for (var ppi = 0; ppi < (LLM.prompts || []).length; ppi++) if (LLM.prompts[ppi].id === ppv) pp = LLM.prompts[ppi];
+        llmSyncDefaultsFromDom();
+        if (!LLM.defaults) LLM.defaults = {};
+        LLM.defaults.prompt = pp ? pp.content : '';
         renderLlmPage();
       } else if (kind === 'maxtokens') {
         llmSyncDefaultsFromDom();

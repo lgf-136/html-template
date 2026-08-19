@@ -1571,7 +1571,7 @@
       fieldHtml(L('chats.maxTokens', 'Max tokens'),
         '<div class="chat-select-row">' +
         '<input type="text" class="chat-input" value="' + escAttr(formatMaxTokens(p.maxTokens)) + '" data-chat-maxtokens>' +
-        ddMenu('maxtokens', '',
+        ddMenu('maxtokens', formatMaxTokens(p.maxTokens),
           '<div class="chat-dd-label">常用值</div>' +
           [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 393216, 524288, 1048576, 2097152].map(function (v) {
             return ddItem('maxtokens', String(v), formatMaxTokens(v), false);

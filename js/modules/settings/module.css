@@ -826,6 +826,11 @@
   flex: 1;
   min-width: 0;
 }
+.sp-llm-dd-empty {
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
 .sp-llm-savebar {
   display: flex;
   align-items: center;
