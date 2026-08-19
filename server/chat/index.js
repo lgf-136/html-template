@@ -299,6 +299,13 @@ function createChat(deps) {
       'INSERT INTO chat_config (workspace_id, config, secrets, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET config = excluded.config, secrets = excluded.secrets, updated_at = excluded.updated_at',
       [ws, JSON.stringify(config), encrypt(JSON.stringify(cleanSecrets)), new Date().toISOString()]
     );
+    // MCP 服务器及其启用状态(含每个工具的开关)是全局设置(app_settings llm:mcp,
+    // 与设置页共享同一份数据)。聊天模块通过 /api/chat/config 保存时必须同样落全局,
+    // 否则 loadAll 会用全局 llm:mcp(可能是空数组)覆盖 chat_config 里的 MCP,刷新即丢失。
+    await db.run(
+      'INSERT INTO app_settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+      [GLOBAL_WORKSPACE_ID, 'llm:mcp', JSON.stringify(config.mcp || []), new Date().toISOString()]
+    );
     return { config, secrets: cleanSecrets };
   }
 

@@ -69,6 +69,48 @@ test('chat: 配置 + 密钥往返,密钥加密落库', async () => {
   assert.ok(rawSecrets.indexOf('sk-test-secret-123') === -1);
 });
 
+test('chat: 通过 /api/chat/config 保存 MCP 同步写入全局 llm:mcp(刷新后不丢失,含工具启用状态)', async () => {
+  const config = {
+    groups: [],
+    tags: [],
+    mcp: [
+      {
+        id: 'mcp-persist',
+        name: '持久化 MCP',
+        url: 'https://example.com/mcp',
+        protocol: 'https',
+        enabled: false,
+        apiKey: 'sk-test-key',
+        headers: { 'x-custom': 'v1' },
+        tools: [
+          { name: 'tool-a', description: '工具 A', enabled: true },
+          { name: 'tool-b', description: '工具 B', enabled: false },
+        ],
+      },
+    ],
+  };
+  const put = await srv.request('PUT', '/api/chat/config', { token, body: { config, secrets: {} } });
+  assert.equal(put.status, 200);
+
+  // 全局 app_settings.llm:mcp 已落库(与设置页共享同一份数据)
+  const raw = srv.readDbValue('llm:mcp', 'global');
+  assert.ok(raw, 'llm:mcp 应写入全局 app_settings');
+  const stored = JSON.parse(raw);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].id, 'mcp-persist');
+  assert.equal(stored[0].enabled, false, '服务器总开关状态应保留');
+  assert.equal(stored[0].tools[0].enabled, true);
+  assert.equal(stored[0].tools[1].enabled, false, '工具开关状态应保留');
+
+  // 重新加载(等价于刷新页面)后仍可读回,不被全局空数组覆盖
+  const state = await srv.request('GET', '/api/chat/state', { token });
+  assert.equal(state.status, 200);
+  const mcp = (state.json.config.mcp || []).filter(function (s) { return s.id === 'mcp-persist'; });
+  assert.equal(mcp.length, 1, '刷新后 MCP 服务器应保留');
+  assert.equal(mcp[0].enabled, false);
+  assert.equal(mcp[0].tools[1].enabled, false);
+});
+
 test('chat: 会话创建 / 列表预览 / 单个读取 / 更新 / 删除', async () => {
   // 创建
   const create = await srv.request('POST', '/api/chat/conversations', {
