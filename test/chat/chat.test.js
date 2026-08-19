@@ -145,14 +145,18 @@ test('chat: 会话创建 / 列表预览 / 单个读取 / 更新 / 删除', async
   assert.equal(one.status, 200);
   assert.equal(one.json.conversation.messages.length, 2);
 
-  // 更新:置顶 + 收藏 + 存档
+  // 更新:置顶 + 收藏 + 存档 + 分组/标签(元数据补丁,未提供 messages 时保留原值)
   const upd = await srv.request('PUT', '/api/chat/conversations', {
     token,
-    body: { conversation: { id: 'conv-1', title: '改名', pinned: true, favorite: true, archived: true } },
+    body: {
+      conversation: { id: 'conv-1', title: '改名', pinned: true, favorite: true, archived: true, groupId: 'g1', tagIds: ['t1'] },
+    },
   });
   assert.equal(upd.status, 200);
   assert.equal(upd.json.conversation.title, '改名');
   assert.equal(upd.json.conversation.pinned, true);
+  assert.equal(upd.json.conversation.groupId, 'g1');
+  assert.deepEqual(upd.json.conversation.tagIds, ['t1']);
   assert.equal(upd.json.conversation.messages.length, 2); // 未提供 messages 时保留原值
 
   // 批量删除

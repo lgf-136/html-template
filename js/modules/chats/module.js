@@ -145,7 +145,6 @@
     conv: null, // 当前会话(含 messages)
     active: null, // 当前生效参数(provider/model/params/promptId/thinking/…)
     sideTab: 'groups',
-    sideSearch: '',
     listSearch: '',
     groupFilter: null,
     tagFilter: null,
@@ -853,16 +852,25 @@
   }
 
   function patchConv(id, patch, opts) {
+    var meta = null;
+    for (var i = 0; i < state.conversations.length; i++) if (state.conversations[i].id === id) { meta = state.conversations[i]; break; }
+    if (meta) {
+      Object.keys(patch).forEach(function (k) { meta[k] = patch[k]; });
+    }
     if (state.conv && state.conv.id === id) {
       Object.keys(patch).forEach(function (k) { state.conv[k] = patch[k]; });
       saveConversation(state.conv);
-      var meta = state.conversations.filter(function (c) { return c.id === id; })[0];
-      if (meta) {
-        Object.keys(patch).forEach(function (k) {
-          if (k === 'tagIds' || k === 'groupId' || k === 'title' || k === 'favorite' || k === 'pinned' || k === 'archived')
-            meta[k] = patch[k];
-        });
-      }
+    } else if (meta) {
+      // 非当前会话:仅推送元数据补丁,后端按已有行合并,保留消息
+      saveConversation({
+        id: meta.id,
+        title: meta.title,
+        groupId: meta.groupId,
+        tagIds: meta.tagIds,
+        favorite: meta.favorite,
+        pinned: meta.pinned,
+        archived: meta.archived,
+      });
     }
     if (!opts || !opts.noRerender) rerender();
   }
@@ -873,8 +881,6 @@
     if (!conv) return;
     var next = !conv[flag];
     patchConv(id, (function () { var p = {}; p[flag] = next; return p; })());
-    // 若当前选中会话在内存中,同步
-    if (state.conv && state.conv.id === id) state.conv[flag] = next;
   }
 
   /* ============================================================
@@ -1011,71 +1017,360 @@
       '<button type="button" class="chat-side-tab' + (state.sideTab === 'groups' ? ' is-active' : '') + '" data-chat-side-tab="groups">' + icon('folder') + L('chats.groups', 'Groups') + '</button>' +
       '<button type="button" class="chat-side-tab' + (state.sideTab === 'tags' ? ' is-active' : '') + '" data-chat-side-tab="tags">' + icon('hash') + L('chats.tags', 'Tags') + '</button>' +
       '</div>' +
-      '<div class="chat-side-search">' +
-      App.ui.searchInput.html({
-        placeholder: L('chats.searchGroups', 'Search groups / tags…'),
-        value: state.sideSearch,
-        attrs: 'data-chat-side-search',
-        class: 'is-compact',
-        clearLabel: 'x',
-      }) +
-      '</div>' +
-      '<div class="chat-side-tree" data-chat-side-tree>' + sideTopHtml() + '</div>' +
+      sideSectionHeadHtml() +
+      sideTopHtml() +
       '</div>' +
       '</div>' +
       '</aside>'
     );
   }
 
-  function sideTopHtml() {
+  function sideSectionHeadHtml() {
     if (state.sideTab === 'groups') {
-      var groups = (state.config && state.config.groups) || [];
-      var q = state.sideSearch.trim().toLowerCase();
-      var list = groups.filter(function (g) {
-        return !q || g.name.toLowerCase().indexOf(q) !== -1;
-      });
-      var addBtn =
-        '<button type="button" class="chat-composer-btn" data-chat-group-add data-tip="' + L('chats.newGroup', 'New group') + '">' + icon('plus') + '</button>';
       return (
-        '<div class="chat-side-section-head"><span>' + L('chats.groups', 'Groups') + '</span>' + addBtn + '</div>' +
-        '<div class="chat-tree-list">' +
-        '<button type="button" class="chat-tree-row' + (!state.groupFilter ? ' is-active' : '') + '" data-chat-group-filter="">' + icon('layers', 'size-4') + '<span>全部</span><span class="chat-tree-count">' + groupCount('') + '</span></button>' +
-        (list.length
-          ? list.map(function (g) {
-              return (
-                '<button type="button" class="chat-tree-row' + (state.groupFilter === g.id ? ' is-active' : '') + '" data-chat-group-filter="' + escAttr(g.id) + '">' +
-                '<span class="chat-tree-dot" style="background:' + escAttr(g.color || 'var(--muted-foreground)') + '"></span>' +
-                '<span>' + esc(g.name) + '</span><span class="chat-tree-count">' + groupCount(g.id) + '</span>' +
-                '</button>'
-              );
-            }).join('')
-          : '<div class="chat-tree-empty">' + L('chats.noGroups', 'No groups') + '</div>') +
-        '</div>'
+        '<div class="chat-side-section-head"><span>' + L('chats.groups', 'Groups') + '</span>' +
+        '<span class="chat-side-section-acts">' +
+        '<button type="button" class="chat-composer-btn" data-chat-group-collapse data-tip="' + L('chats.collapseAll', 'Collapse all') + '">' + icon('arrow-up') + '</button>' +
+        '<button type="button" class="chat-composer-btn" data-chat-group-expand data-tip="' + L('chats.expandAll', 'Expand all') + '">' + icon('arrow-down') + '</button>' +
+        '<button type="button" class="chat-composer-btn" data-chat-group-add data-tip="' + L('chats.newGroup', 'New group') + '">' + icon('plus') + '</button>' +
+        '</span></div>'
       );
     }
-    var tags = (state.config && state.config.tags) || [];
-    var q2 = state.sideSearch.trim().toLowerCase();
-    var tlist = tags.filter(function (t) {
-      return !q2 || t.name.toLowerCase().indexOf(q2) !== -1;
-    });
-    var addTag =
-      '<button type="button" class="chat-composer-btn" data-chat-tag-add data-tip="' + L('chats.newTag', 'New tag') + '">' + icon('plus') + '</button>';
     return (
-      '<div class="chat-side-section-head"><span>' + L('chats.tags', 'Tags') + '</span>' + addTag + '</div>' +
-      '<div class="chat-tree-list">' +
-      '<button type="button" class="chat-tree-row' + (!state.tagFilter ? ' is-active' : '') + '" data-chat-tag-filter="">' + icon('hash', 'size-4') + '<span>全部</span></button>' +
-      (tlist.length
-        ? tlist.map(function (t) {
-            return (
-              '<button type="button" class="chat-tree-row' + (state.tagFilter === t.id ? ' is-active' : '') + '" data-chat-tag-filter="' + escAttr(t.id) + '">' +
-              '<span class="chat-tree-dot" style="background:' + escAttr(t.color || 'var(--muted-foreground)') + '"></span>' +
-              '<span>' + esc(t.name) + '</span><span class="chat-tree-count">' + tagCount(t.id) + '</span>' +
-              '</button>'
-            );
-          }).join('')
-        : '<div class="chat-tree-empty">' + L('chats.noTags', 'No tags') + '</div>') +
+      '<div class="chat-side-section-head"><span>' + L('chats.tags', 'Tags') + '</span>' +
+      '<button type="button" class="chat-composer-btn" data-chat-tag-add data-tip="' + L('chats.newTag', 'New tag') + '">' + icon('plus') + '</button>' +
       '</div>'
     );
+  }
+
+  function sideTopHtml() {
+    return (
+      '<div class="chat-side-tree" data-chat-side-tree>' +
+      (state.sideTab === 'groups' ? ensureGroupTree().render() : ensureTagTree().render()) +
+      '</div>'
+    );
+  }
+
+  /** 树组件内部重绘(搜索/颜色筛选等):重建后恢复搜索框焦点与光标 */
+  function rerenderTree() {
+    var activeEl = document.activeElement;
+    var wasSearch =
+      activeEl && activeEl.hasAttribute &&
+      (activeEl.hasAttribute('data-gt-filter') || activeEl.hasAttribute('data-tp-search'));
+    var val = wasSearch ? activeEl.value : null;
+    var pos = wasSearch ? activeEl.selectionStart : null;
+    rerenderList();
+    if (wasSearch) {
+      var sel = state.sideTab === 'groups' ? '[data-gt-filter]' : '[data-tp-search]';
+      var inp = document.querySelector('[data-chat-side-tree] ' + sel);
+      if (inp) {
+        inp.focus();
+        if (pos != null) {
+          try { inp.setSelectionRange(pos, pos); } catch (e) {}
+        }
+      }
+    }
+  }
+
+  /** 公共分组树组件(与 apihub 共用,样式/交互一致) */
+  var groupTreeInst = null;
+  function ensureGroupTree() {
+    if (groupTreeInst) return groupTreeInst;
+    groupTreeInst = App.ui.groupTree.create({
+      nodes: function () {
+        return (state.config && state.config.groups) || [];
+      },
+      rootLabel: L('chats.all', 'All'),
+      activeId: state.groupFilter || 'root',
+      labels: {
+        newGroup: L('chats.newGroup', 'New group'),
+        newChild: L('chats.newSubgroup', 'New subgroup'),
+        newSibling: L('chats.newSibling', 'New sibling'),
+        rename: L('chats.rename', 'Rename'),
+        moveTo: L('chats.moveTo', 'Move to group'),
+        icon: L('chats.setIcon', 'Set icon'),
+        color: L('chats.setColor', 'Set color'),
+        delete: L('chats.delete', 'Delete'),
+        deleteConfirm: L('chats.deleteGroupConfirm', 'Delete group'),
+        deleteMsg: L('chats.deleteGroupMsg', 'Delete "{name}" and its subgroups? Conversations keep their messages.'),
+        rootGroup: L('chats.rootGroup', 'Root (none)'),
+        search: L('chats.searchGroups', 'Search groups…'),
+        clear: L('chats.clearSearch', 'Clear search'),
+        empty: L('chats.noGroups', 'No groups'),
+        noMatch: L('chats.noGroupsMatch', 'No matching groups'),
+        name: L('chats.name', 'Name'),
+        namePlaceholder: L('chats.groupNamePlaceholder', 'Group name'),
+        nameRequired: L('chats.nameRequired', 'Name is required'),
+        parentGroup: L('chats.parentGroup', 'Parent group'),
+        chooseParent: L('chats.chooseParent', 'Choose target group'),
+        iconSearch: L('chats.iconSearch', 'Search icons…'),
+        emoji: L('chats.emoji', 'Emoji'),
+        emojiInput: L('chats.emojiInput', 'Paste any emoji…'),
+        clearIcon: L('chats.clearIcon', 'Clear icon'),
+        clearColor: L('chats.clearColor', 'Clear color'),
+        apply: L('chats.apply', 'Apply'),
+        cancel: L('chats.cancel', 'Cancel'),
+        save: L('chats.save', 'Save'),
+        copied: L('chats.copied', 'Copied'),
+        menu: L('chats.menu', 'Menu'),
+        renameHint: L('chats.renameHint', 'Double-click to rename'),
+      },
+      count: function (node) {
+        return groupCount(node.id);
+      },
+      onSelect: function (id) {
+        state.groupFilter = id || null;
+        rerenderList();
+      },
+      onCreate: function (parentId, name) {
+        addGroup(name, parentId);
+      },
+      onRename: function (id, name) {
+        renameGroup(id, name);
+      },
+      onDelete: function (id) {
+        deleteGroup(id);
+      },
+      onMove: function (id, targetId, zone) {
+        moveGroup(id, targetId, zone);
+      },
+      onIconChange: function (id, iconName) {
+        setGroupIcon(id, iconName);
+      },
+      onColorChange: function (id, color) {
+        setGroupColor(id, color);
+      },
+      onRender: function () {
+        rerenderTree();
+      },
+    });
+    return groupTreeInst;
+  }
+
+  /** 公共标签组件(与 apihub 共用,样式/交互一致) */
+  var tagTreeInst = null;
+  function ensureTagTree() {
+    if (tagTreeInst) return tagTreeInst;
+    tagTreeInst = App.ui.tagPicker.create({
+      nodes: function () {
+        return (state.config && state.config.tags) || [];
+      },
+      activeId: state.tagFilter || '',
+      labels: {
+        newTag: L('chats.newTag', 'New tag'),
+        rename: L('chats.rename', 'Rename'),
+        color: L('chats.setColor', 'Set color'),
+        delete: L('chats.delete', 'Delete'),
+        deleteConfirm: L('chats.deleteTagConfirm', 'Delete tag'),
+        deleteTagMsg: L('chats.deleteTagMsg', 'Delete tag "{name}"? It will be removed from all conversations.'),
+        searchTags: L('chats.searchTags', 'Search tags…'),
+        clear: L('chats.clearSearch', 'Clear search'),
+        empty: L('chats.noTags', 'No tags'),
+        noMatch: L('chats.noTagsMatch', 'No matching tags'),
+        name: L('chats.name', 'Name'),
+        namePlaceholder: L('chats.tagNamePlaceholder', 'Tag name'),
+        nameRequired: L('chats.nameRequired', 'Name is required'),
+        nameExists: L('chats.nameExists', 'Tag already exists'),
+        nameTooLong: L('chats.nameTooLong', 'Tag name is too long'),
+        allTags: L('chats.allTags', 'All tags'),
+        untagged: L('chats.untagged', 'Untagged'),
+        allColors: L('chats.allColors', 'All colors'),
+        customColor: L('chats.customColor', 'Custom color'),
+        createTag: L('chats.createTag', 'Create tag'),
+        selected: L('chats.selected', 'selected'),
+        noneSelected: L('chats.noneSelected', 'Nothing selected'),
+        done: L('chats.done', 'Done'),
+        menu: L('chats.menu', 'Menu'),
+        renameHint: L('chats.renameHint', 'Double-click to rename'),
+        cancel: L('chats.cancel', 'Cancel'),
+        save: L('chats.save', 'Save'),
+        copied: L('chats.copied', 'Copied'),
+      },
+      count: function (id) {
+        if (id === null) {
+          return state.conversations.filter(function (c) { return !c.archived && !(c.tagIds || []).length; }).length;
+        }
+        return tagCount(id);
+      },
+      onSelect: function (id) {
+        state.tagFilter = id || null;
+        rerenderList();
+      },
+      onCreate: function (name, color) {
+        addTag(name, color);
+      },
+      onRename: function (id, name, color) {
+        renameTag(id, name, color);
+      },
+      onDelete: function (id) {
+        deleteTag(id);
+      },
+      onColorChange: function (id, color) {
+        setTagColor(id, color);
+      },
+      onToggle: function (id) {
+        var d = state.dialog;
+        if (!d || d.kind !== 'tagpick') return;
+        var conv = null;
+        for (var i = 0; i < state.conversations.length; i++) if (state.conversations[i].id === d.id) { conv = state.conversations[i]; break; }
+        if (!conv) return;
+        var ids = (conv.tagIds || []).slice();
+        var at = ids.indexOf(id);
+        if (at === -1) ids.push(id);
+        else ids.splice(at, 1);
+        patchConv(d.id, { tagIds: ids }, { noRerender: true });
+        // 仅重绘弹窗内的选择器,保留搜索焦点
+        var wrap = document.querySelector('[data-chat-dialog] [data-chat-tagpick]');
+        if (wrap) wrap.innerHTML = ensureTagTree().pickerHtml(ids);
+      },
+      onRender: function () {
+        rerenderTree();
+      },
+      onRenderMenu: function () {
+        var wrap = document.querySelector('[data-chat-dialog] [data-chat-tagpick]');
+        if (!wrap) return;
+        var d = state.dialog;
+        if (!d || d.kind !== 'tagpick') return;
+        var conv = null;
+        for (var i = 0; i < state.conversations.length; i++) if (state.conversations[i].id === d.id) { conv = state.conversations[i]; break; }
+        var ids = (conv && conv.tagIds) || [];
+        wrap.innerHTML = ensureTagTree().pickerHtml(ids);
+        var inp = wrap.querySelector('[data-tp-pick-search]');
+        if (inp) {
+          inp.focus();
+          try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {}
+        }
+      },
+    });
+    return tagTreeInst;
+  }
+
+  /* ---------- 分组 / 标签 CRUD ---------- */
+  function addGroup(name, parentId) {
+    state.config.groups = (state.config.groups || []).concat([
+      { id: uid('g'), name: name, parentId: parentId || '', sort: 0, color: '', icon: '' },
+    ]);
+    persistConfig();
+    rerenderList();
+  }
+  function renameGroup(id, name) {
+    state.config.groups = (state.config.groups || []).map(function (g) {
+      return g.id === id ? Object.assign({}, g, { name: name }) : g;
+    });
+    persistConfig();
+    rerenderList();
+  }
+  function moveGroup(id, targetId, zone) {
+    var next = App.ui.groupTree.moveNode(state.config.groups || [], id, targetId, zone);
+    if (!next) return;
+    state.config.groups = next;
+    persistConfig();
+    rerenderList();
+  }
+  function setGroupIcon(id, iconName) {
+    state.config.groups = (state.config.groups || []).map(function (g) {
+      return g.id === id ? Object.assign({}, g, { icon: iconName || '' }) : g;
+    });
+    persistConfig();
+    rerenderList();
+  }
+  function setGroupColor(id, color) {
+    state.config.groups = (state.config.groups || []).map(function (g) {
+      return g.id === id ? Object.assign({}, g, { color: color || '' }) : g;
+    });
+    persistConfig();
+    rerenderList();
+  }
+  function deleteGroup(id) {
+    // 收集自身 + 全部子孙分组
+    var ids = [id];
+    var changed = true;
+    while (changed) {
+      changed = false;
+      (state.config.groups || []).forEach(function (g) {
+        if (ids.indexOf(g.id) === -1 && ids.indexOf(g.parentId) !== -1) {
+          ids.push(g.id);
+          changed = true;
+        }
+      });
+    }
+    state.config.groups = (state.config.groups || []).filter(function (g) {
+      return ids.indexOf(g.id) === -1;
+    });
+    // 解除会话引用并持久化
+    state.conversations.forEach(function (c) {
+      if (ids.indexOf(c.groupId) !== -1) persistConvMeta(c);
+    });
+    if (state.groupFilter && ids.indexOf(state.groupFilter) !== -1) state.groupFilter = null;
+    persistConfig();
+    rerenderList();
+  }
+  function addTag(name, color) {
+    state.config.tags = (state.config.tags || []).concat([
+      { id: uid('t'), name: name, color: color || '', sort: 0 },
+    ]);
+    persistConfig();
+    rerenderList();
+  }
+  function renameTag(id, name, color) {
+    state.config.tags = (state.config.tags || []).map(function (t) {
+      return t.id === id ? Object.assign({}, t, { name: name, color: color != null ? color : t.color }) : t;
+    });
+    persistConfig();
+    rerenderList();
+  }
+  function setTagColor(id, color) {
+    state.config.tags = (state.config.tags || []).map(function (t) {
+      return t.id === id ? Object.assign({}, t, { color: color || '' }) : t;
+    });
+    persistConfig();
+    rerenderList();
+  }
+  function deleteTag(id) {
+    state.config.tags = (state.config.tags || []).filter(function (t) { return t.id !== id; });
+    // 从所有会话移除并持久化
+    state.conversations.forEach(function (c) {
+      if ((c.tagIds || []).indexOf(id) !== -1) {
+        var ids = (c.tagIds || []).filter(function (x) { return x !== id; });
+        c.tagIds = ids;
+        persistConvMeta(c);
+      }
+    });
+    if (state.tagFilter === id) state.tagFilter = null;
+    persistConfig();
+    rerenderList();
+  }
+  /** 会话元数据直接落库(绕过防抖,批量场景避免只保存最后一条) */
+  function persistConvMeta(c) {
+    App.api.put('/api/chat/conversations', {
+      conversation: {
+        id: c.id,
+        title: c.title,
+        groupId: c.groupId,
+        tagIds: c.tagIds,
+        favorite: c.favorite,
+        pinned: c.pinned,
+        archived: c.archived,
+      },
+    }).catch(function (e) {
+      if (e && e.status !== 401) App.logger.warn('chats', '会话元数据保存失败', e);
+    });
+  }
+
+  /** 移动到分组:单选分组列表 */
+  function groupPickHtml(current) {
+    var groups = (state.config && state.config.groups) || [];
+    var html =
+      '<div class="chat-grouppick">' +
+      '<label class="chat-grouppick-opt' + (!current ? ' is-on' : '') + '" data-chat-grouppick="">' +
+      '<span class="chat-grouppick-dot"></span><span>' + esc(L('chats.noGroup', 'No group')) + '</span></label>';
+    groups.forEach(function (g) {
+      html +=
+        '<label class="chat-grouppick-opt' + (current === g.id ? ' is-on' : '') + '" data-chat-grouppick="' + escAttr(g.id) + '">' +
+        '<span class="chat-grouppick-dot" style="background:' + escAttr(g.color || 'var(--muted-foreground)') + '"></span>' +
+        '<span>' + esc(g.name) + '</span></label>';
+    });
+    return html + '</div>';
   }
 
   function groupCount(gid) {
@@ -1142,7 +1437,8 @@
     else if (state.filter === 'archive') list = list.filter(function (c) { return c.archived; });
     else list = list.filter(function (c) { return !c.archived; });
     if (state.groupFilter) list = list.filter(function (c) { return c.groupId === state.groupFilter; });
-    if (state.tagFilter) list = list.filter(function (c) { return (c.tagIds || []).indexOf(state.tagFilter) !== -1; });
+    if (state.tagFilter === '__none__') list = list.filter(function (c) { return !(c.tagIds || []).length; });
+    else if (state.tagFilter) list = list.filter(function (c) { return (c.tagIds || []).indexOf(state.tagFilter) !== -1; });
     if (q) {
       list = list.filter(function (c) {
         return (c.title || '').toLowerCase().indexOf(q) !== -1 || (c.preview || '').toLowerCase().indexOf(q) !== -1;
@@ -1769,16 +2065,14 @@
       body = pmList || '<p class="sp-field-desc" style="color:var(--muted-foreground)">' + L('chats.noPrompts', 'No prompts yet') + '</p>';
       footExtra =
         '<button type="button" class="chat-btn is-primary" data-prompt-mgmt-new>' + icon('plus', 'size-3') + L('chats.newPrompt', 'New prompt') + '</button>';
-    } else if (d.kind === 'group') {
-      title = d.id ? '编辑分组' : L('chats.newGroup', 'New group');
-      body =
-        fieldHtml(L('chats.name', 'Name'), '<input type="text" class="chat-input" data-dlg-field="name" value="' + escAttr(d.name || '') + '" placeholder="工作">') +
-        fieldHtml(L('chats.color', 'Color'), '<input type="text" class="chat-input" data-dlg-field="color" value="' + escAttr(d.color || '') + '" placeholder="#3b82f6">');
-    } else if (d.kind === 'tag') {
-      title = d.id ? '编辑标签' : L('chats.newTag', 'New tag');
-      body =
-        fieldHtml(L('chats.name', 'Name'), '<input type="text" class="chat-input" data-dlg-field="name" value="' + escAttr(d.name || '') + '" placeholder="重要">') +
-        fieldHtml(L('chats.color', 'Color'), '<input type="text" class="chat-input" data-dlg-field="color" value="' + escAttr(d.color || '') + '" placeholder="#ef4444">');
+    } else if (d.kind === 'move') {
+      title = L('chats.moveTo', 'Move to group');
+      var moveConv = state.conversations.filter(function (c) { return c.id === d.id; })[0];
+      body = groupPickHtml(moveConv ? moveConv.groupId || '' : '');
+    } else if (d.kind === 'tagpick') {
+      title = L('chats.addTag', 'Add tag');
+      var tagConv = state.conversations.filter(function (c) { return c.id === d.id; })[0];
+      body = '<div data-chat-tagpick>' + ensureTagTree().pickerHtml((tagConv && tagConv.tagIds) || []) + '</div>';
     } else if (d.kind === 'url') {
       title = d.urlKind === 'image' ? '远程图片 URL' : '远程文件 URL';
       body = fieldHtml('URL', '<input type="text" class="chat-input" data-dlg-field="url" placeholder="https://…">');
@@ -2317,25 +2611,12 @@
     var st = target.closest('[data-chat-side-tab]');
     if (st) {
       state.sideTab = st.getAttribute('data-chat-side-tab');
-      state.sideSearch = '';
       rerender();
       return;
     }
     var flt = target.closest('[data-chat-filter]');
     if (flt) {
       state.filter = flt.getAttribute('data-chat-filter');
-      rerender();
-      return;
-    }
-    var gf = target.closest('[data-chat-group-filter]');
-    if (gf) {
-      state.groupFilter = gf.getAttribute('data-chat-group-filter') || null;
-      rerender();
-      return;
-    }
-    var tf = target.closest('[data-chat-tag-filter]');
-    if (tf) {
-      state.tagFilter = tf.getAttribute('data-chat-tag-filter') || null;
       rerender();
       return;
     }
@@ -2629,11 +2910,27 @@
       return;
     }
     if (target.closest('[data-chat-group-add]')) {
-      openDialog('group', {});
+      ensureGroupTree().createDialog('');
       return;
     }
     if (target.closest('[data-chat-tag-add]')) {
-      openDialog('tag', {});
+      ensureTagTree().openCreateDialog(target.closest('[data-chat-tag-add]'));
+      return;
+    }
+    if (target.closest('[data-chat-group-expand]')) {
+      ensureGroupTree().expandAll();
+      rerenderList();
+      return;
+    }
+    if (target.closest('[data-chat-group-collapse]')) {
+      ensureGroupTree().collapseAll();
+      rerenderList();
+      return;
+    }
+    if (target.closest('[data-chat-grouppick]')) {
+      var gpEl = target.closest('[data-chat-grouppick]');
+      state.dialog.groupId = gpEl.getAttribute('data-chat-grouppick') || '';
+      rerender();
       return;
     }
 
@@ -2841,35 +3138,12 @@
       persistConfig();
       App.ui.toast(L('chats.saved', 'Saved'));
       closeDialog();
-    } else if (d.kind === 'group') {
-      var gn = dlgField('name').trim();
-      if (!gn) {
-        App.ui.toast('名称必填', 'error');
-        return;
-      }
-      var gc = dlgField('color').trim() || '#3b82f6';
-      var gid = d.id || uid('g');
-      var ge = { id: gid, name: gn, color: gc, parentId: '', sort: 0 };
-      var gExists = (state.config.groups || []).filter(function (g) { return g.id === gid; })[0];
-      if (gExists) state.config.groups = state.config.groups.map(function (g) { return g.id === gid ? ge : g; });
-      else state.config.groups = (state.config.groups || []).concat([ge]);
-      persistConfig();
+    } else if (d.kind === 'move') {
+      patchConv(d.id, { groupId: d.groupId || '' });
       App.ui.toast(L('chats.saved', 'Saved'));
       closeDialog();
-    } else if (d.kind === 'tag') {
-      var tn = dlgField('name').trim();
-      if (!tn) {
-        App.ui.toast('名称必填', 'error');
-        return;
-      }
-      var tc = dlgField('color').trim() || '#ef4444';
-      var tid = d.id || uid('t');
-      var te = { id: tid, name: tn, color: tc, sort: 0 };
-      var tExists = (state.config.tags || []).filter(function (t) { return t.id === tid; })[0];
-      if (tExists) state.config.tags = state.config.tags.map(function (t) { return t.id === tid ? te : t; });
-      else state.config.tags = (state.config.tags || []).concat([te]);
-      persistConfig();
-      App.ui.toast(L('chats.saved', 'Saved'));
+    } else if (d.kind === 'tagpick') {
+      // 标签选择在选择器内即时生效(onToggle),此处仅关闭
       closeDialog();
     } else if (d.kind === 'url') {
       var u = dlgField('url').trim();
@@ -2887,11 +3161,6 @@
       if (!rn) return;
       patchConv(d.id, { title: rn });
       App.ui.toast(L('chats.saved', 'Saved'));
-      closeDialog();
-    } else if (d.kind === 'move') {
-      // 移动到分组由 group 选择弹窗完成(此处简化:直接选择)
-      closeDialog();
-    } else if (d.kind === 'tagpick') {
       closeDialog();
     } else if (d.kind === 'confirm') {
       closeDialog();
@@ -2917,12 +3186,6 @@
     if (target.hasAttribute('data-chat-list-search')) {
       state.listSearch = target.value;
       rerenderList();
-      return;
-    }
-    if (target.hasAttribute('data-chat-side-search')) {
-      state.sideSearch = target.value;
-      var tree = document.querySelector('[data-chat-side-tree]');
-      if (tree) tree.outerHTML = sideTopHtml();
       return;
     }
     if (target.hasAttribute('data-chat-textarea')) {
