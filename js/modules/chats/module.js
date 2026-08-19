@@ -165,6 +165,7 @@
     ctx: null, // { id, x, y }
     dragSlider: null,
     mcpOpen: {}, // MCP 卡片: 工具列表展开状态
+    mcpToolOpen: {}, // MCP 卡片: 单个工具描述展开状态
     mcpBusy: null, // MCP 卡片: 正在拉取工具的服务器 id
   };
 
@@ -1676,10 +1677,17 @@
           (tools.length
             ? tools.map(function (t) {
                 var disabled = !s.enabled;
+                var tOpen = state.mcpToolOpen[s.id + ':' + t.name] === true;
                 return (
                   '<div class="chat-mcp-tool' + (disabled ? ' is-disabled' : '') + '">' +
-                  '<div class="chat-mcp-tool-name">' + esc(t.name || 'tool') + (t.description ? '<div class="chat-mcp-tool-desc">' + esc(t.description) + '</div>' : '') + '</div>' +
+                  '<div class="chat-mcp-tool-row">' +
+                  '<button type="button" class="chat-mcp-tool-toggle' + (tOpen ? ' is-open' : '') + '" data-chat-mcp-tool-desc="' + escAttr(s.id) + ':' + escAttr(t.name) + '">' +
+                  '<span class="chat-mcp-chevron">' + icon('chevron-right') + '</span>' +
+                  '<span class="chat-mcp-tool-name">' + esc(t.name || 'tool') + '</span>' +
+                  '</button>' +
                   '<button type="button" class="chat-switch' + (t.enabled && !disabled ? ' is-on' : '') + '" ' + (disabled ? 'disabled' : '') + ' data-chat-mcp-tool-toggle="' + escAttr(s.id) + ':' + escAttr(t.name) + '" aria-label="tool"></button>' +
+                  '</div>' +
+                  (tOpen && t.description ? '<div class="chat-mcp-tool-desc">' + esc(t.description) + '</div>' : '') +
                   '</div>'
                 );
               }).join('')
@@ -2224,8 +2232,9 @@
     }
     if (!target.closest('[data-chat-ctx]')) closeCtx();
 
-    // 弹窗
-    if (target.closest('[data-chat-dlg-close]') || target.closest('[data-chat-dlg-backdrop]')) {
+    // 弹窗(点击遮罩本体=弹窗外区域才关闭;点击弹窗内部元素不关闭)
+    var dlgBackdrop = target.closest('[data-chat-dlg-backdrop]');
+    if (target.closest('[data-chat-dlg-close]') || (dlgBackdrop && !target.closest('[data-chat-dialog]'))) {
       closeDialog();
       return;
     }
@@ -2516,6 +2525,13 @@
     var mcpFetch = target.closest('[data-chat-mcp-fetch]');
     if (mcpFetch) {
       fetchMcpTools(mcpFetch.getAttribute('data-chat-mcp-fetch'));
+      return;
+    }
+    var mcpToolD = target.closest('[data-chat-mcp-tool-desc]');
+    if (mcpToolD) {
+      var mtKey = mcpToolD.getAttribute('data-chat-mcp-tool-desc');
+      state.mcpToolOpen[mtKey] = state.mcpToolOpen[mtKey] ? false : true;
+      rerender();
       return;
     }
     var mcpToolsT = target.closest('[data-chat-mcp-toggle-tools]');
