@@ -237,7 +237,15 @@
   display: flex;
   flex-direction: column;
   gap: 0.0625rem;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.125rem 0.375rem;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
 }
+.chat-main-title:hover { background: var(--accent); }
 .chat-main-title .chat-main-name {
   font-size: 0.875rem;
   font-weight: 600;
@@ -520,6 +528,21 @@
 .chat-select-row .chat-select { flex: 1; }
 
 .chat-range-row { display: flex; align-items: center; gap: 0.5rem; }
+/* 输入框思考深度滑块(仅思维链开启时显示) */
+.chat-depth {
+  position: relative;
+  width: 4.25rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.chat-depth .chat-slider-thumb { width: 0.8125rem; height: 0.8125rem; border-width: 1.5px; }
+.chat-depth .chat-slider-track { height: 0.25rem; }
+
 /* 自研滑块(替代原生 input[type=range],类 shadcn 风格) */
 .chat-slider {
   position: relative; flex: 1; height: 1.25rem; display: flex; align-items: center;

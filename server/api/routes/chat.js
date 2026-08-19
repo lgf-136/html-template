@@ -7,7 +7,10 @@
  * POST   /api/chat/conversations    新建会话
  * PUT    /api/chat/conversations    保存/更新会话(upsert)
  * DELETE /api/chat/conversations    批量删除 { ids: [...] }
+ * GET    /api/chat/providers       内置供应商目录
  * POST   /api/chat/models           获取供应商模型列表 { providerId }
+ * POST   /api/chat/balance          查询供应商余额 { providerId }
+ * POST   /api/chat/mcp/tools        拉取 MCP 服务器工具列表 { url, protocol }
  * POST   /api/chat/stream           流式补全(SSE,统一事件格式)
  *
  * 依赖由 server/api/index.js 注入 { db, encrypt, decrypt, chat }。
@@ -108,6 +111,51 @@ function chatRoutes({ db, encrypt, decrypt, chat }) {
     }
   }
 
+  async function getProviders(req, res) {
+    try {
+      const catalog = chat.listCatalog();
+      return sendJson(res, 200, { providers: catalog });
+    } catch (e) {
+      return sendJson(res, 500, { error: 'internal', message: String((e && e.message) || e) });
+    }
+  }
+
+  async function postBalance(req, res) {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      return sendJson(res, 400, { error: 'bad_json' });
+    }
+    try {
+      const { secrets } = await chat.loadAll();
+      const providerId = body && body.providerId;
+      const apiKey =
+        body && typeof body.apiKey === 'string'
+          ? body.apiKey
+          : (secrets.providerKeys && secrets.providerKeys[providerId]) || '';
+      const result = await chat.checkBalance(providerId, apiKey);
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 400, { error: 'balance_failed', message: String((e && e.message) || e) });
+    }
+  }
+
+  async function postMcpTools(req, res) {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      return sendJson(res, 400, { error: 'bad_json' });
+    }
+    try {
+      const result = await chat.listMcpTools(body || {});
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 400, { error: 'mcp_failed', message: String((e && e.message) || e) });
+    }
+  }
+
   async function postModels(req, res) {
     let body;
     try {
@@ -189,7 +237,10 @@ function chatRoutes({ db, encrypt, decrypt, chat }) {
     { method: 'POST', path: '/api/chat/conversations', desc: '新建会话', handler: postConversation },
     { method: 'PUT', path: '/api/chat/conversations', desc: '保存/更新会话', handler: putConversation },
     { method: 'DELETE', path: '/api/chat/conversations', desc: '批量删除会话', handler: deleteConversations },
+    { method: 'GET', path: '/api/chat/providers', desc: '获取内置供应商目录', handler: getProviders },
     { method: 'POST', path: '/api/chat/models', desc: '获取供应商模型列表', handler: postModels },
+    { method: 'POST', path: '/api/chat/balance', desc: '查询供应商余额', handler: postBalance },
+    { method: 'POST', path: '/api/chat/mcp/tools', desc: '拉取 MCP 服务器工具列表', handler: postMcpTools },
     { method: 'POST', path: '/api/chat/stream', desc: '流式补全(SSE)', handler: postStream },
   ];
 }

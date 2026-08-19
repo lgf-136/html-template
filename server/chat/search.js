@@ -146,31 +146,34 @@ async function google(fetchImpl, query, key, cx) {
   };
 }
 
-/** 执行一次联网搜索。keys 形如 { serper, tavily, bing, google, googleCx } */
-async function webSearch(deps, provider, query, keys) {
+/** 执行一次联网搜索。keys 形如 { serper, tavily, bing, google, googleCx }。
+ * opts.results 控制返回结果条数(3-15,默认 6)。 */
+async function webSearch(deps, provider, query, keys, opts) {
   const fetchImpl = (deps && deps.fetchImpl) || (typeof fetch === 'function' ? fetch : null);
   if (!fetchImpl) throw new Error('搜索需要 fetch 实现');
   const q = String(query || '').slice(0, 500);
   if (!q) return { query: q, provider, results: [] };
+  const limit = Math.max(3, Math.min(15, Number((opts && opts.results) || 6)));
 
+  let data;
   if (provider === 'serper') {
     if (!keys.serper) throw new Error('Serper 需要 API Key(在聊天设置 → 搜索 Key 中配置)');
-    return serper(fetchImpl, q, keys.serper);
-  }
-  if (provider === 'tavily') {
+    data = await serper(fetchImpl, q, keys.serper);
+  } else if (provider === 'tavily') {
     if (!keys.tavily) throw new Error('Tavily 需要 API Key(在聊天设置 → 搜索 Key 中配置)');
-    return tavily(fetchImpl, q, keys.tavily);
-  }
-  if (provider === 'bing') {
+    data = await tavily(fetchImpl, q, keys.tavily);
+  } else if (provider === 'bing') {
     if (!keys.bing) throw new Error('Bing 需要 API Key(在聊天设置 → 搜索 Key 中配置)');
-    return bing(fetchImpl, q, keys.bing);
-  }
-  if (provider === 'google') {
+    data = await bing(fetchImpl, q, keys.bing);
+  } else if (provider === 'google') {
     if (!keys.google || !keys.googleCx)
       throw new Error('Google 需要 API Key 与 Search Engine ID(在聊天设置 → 搜索 Key 中配置)');
-    return google(fetchImpl, q, keys.google, keys.googleCx);
+    data = await google(fetchImpl, q, keys.google, keys.googleCx);
+  } else {
+    data = await duckduckgo(fetchImpl, q);
   }
-  return duckduckgo(fetchImpl, q);
+  if (data && Array.isArray(data.results)) data.results = data.results.slice(0, limit);
+  return data;
 }
 
 module.exports = { SEARCH_PROVIDERS, webSearch };

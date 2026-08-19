@@ -886,15 +886,20 @@
   ];
 
   var LLM = {
-    providers: [],
+    providers: [], // 自定义供应商
     mcp: [],
     defaults: {},
-    keys: {},
+    keys: {}, // providerId -> API Key
+    catalog: [], // 内置供应商目录(/api/chat/providers)
+    overrides: {}, // llm:overrides — providerId -> { temperature, topP, maxTokens }
+    search: {}, // llm:search — { provider, results }
+    providerModels: {}, // llm:providerModels — providerId -> 该供应商默认模型
+    models: {}, // llm:models — providerId -> 拉取到的模型列表
     loaded: false,
     error: null,
     form: null, // { kind: 'provider'|'mcp', id } 内联表单
-    models: null, // 获取到的模型列表
-    fetchingModels: false,
+    fetching: {}, // providerId -> bool(模型列表拉取中)
+    busy: {}, // providerId/mcpId -> bool(余额 / 工具拉取中)
   };
 
   function escLlm(s) {
@@ -922,10 +927,30 @@
   }
   function llmAllProviders() {
     var list = LLM_BUILTIN.map(function (b) {
-      return { id: b.id, name: b.name, builtin: true };
+      var cat = null;
+      for (var i = 0; i < LLM.catalog.length; i++) if (LLM.catalog[i].id === b.id) cat = LLM.catalog[i];
+      return {
+        id: b.id,
+        name: b.name,
+        builtin: true,
+        baseUrl: (cat && cat.baseUrl) || '',
+        kind: (cat && cat.kind) || 'openai',
+        keyUrl: (cat && cat.keyUrl) || '',
+        note: (cat && cat.note) || '',
+        multimodal: !!(cat && cat.multimodal),
+      };
     });
     (LLM.providers || []).forEach(function (p) {
-      list.push({ id: p.id, name: p.name, builtin: false, baseUrl: p.baseUrl, kind: p.kind });
+      list.push({
+        id: p.id,
+        name: p.name,
+        builtin: false,
+        baseUrl: p.baseUrl,
+        kind: p.kind,
+        keyUrl: '',
+        note: p.note || '',
+        multimodal: !!p.multimodal,
+      });
     });
     return list;
   }
@@ -950,10 +975,21 @@
       return;
     }
     el.innerHTML =
+      llmIntroHtml(t) +
+      llmSection(t, 'llm.defaults', 'llm.defaults.desc', llmDefaultsHtml(t)) +
       llmSection(t, 'llm.providers', 'llm.providers.desc', llmProvidersHtml(t)) +
-      llmSection(t, 'llm.apikeys', 'llm.apikeys.desc', llmKeysHtml(t)) +
       llmSection(t, 'llm.mcp', 'llm.mcp.desc', llmMcpHtml(t)) +
-      llmSection(t, 'llm.defaults', 'llm.defaults.desc', llmDefaultsHtml(t));
+      llmSection(t, 'llm.search', 'llm.search.desc', llmSearchHtml(t));
+  }
+
+  function llmIntroHtml(t) {
+    return (
+      '<div class="sp-llm-intro">' +
+      '<p>' + t('llm.intro1') + '</p>' +
+      '<p>' + t('llm.intro2') + '</p>' +
+      '<p class="sp-llm-tip">' + t('llm.introTip') + '</p>' +
+      '</div>'
+    );
   }
 
   function llmSection(t, titleKey, descKey, body) {
@@ -964,26 +1000,225 @@
     );
   }
 
-  function llmProvidersHtml(t) {
-    var rows = (LLM.providers || []).map(function (p) {
-      return (
-        '<div class="sp-llm-row"><div class="sp-llm-row-main"><span class="sp-label">' + escLlm(p.name) + '</span>' +
-        '<span class="sp-field-desc">' + escLlm(p.baseUrl) + ' · ' + escLlm(p.kind || 'openai') + '</span></div>' +
-        '<div class="sp-llm-row-actions">' +
-        '<button type="button" data-llm-edit-provider="' + escLlm(p.id) + '" class="sp-llm-btn">' + t('llm.edit') + '</button>' +
-        '<button type="button" data-llm-del-provider="' + escLlm(p.id) + '" class="sp-llm-btn is-danger">' + t('llm.delete') + '</button>' +
-        '</div></div>'
-      );
+  /* ---------- 通用参数(全局默认,模块级可覆盖) ---------- */
+  function llmDefaultsHtml(t) {
+    var d = LLM.defaults || {};
+    var params = d.params || {};
+    var provider = d.provider || 'opencode-go';
+    var model = d.model || '';
+    var thinking = d.thinking || 'none';
+    var prompt = d.prompt || '';
+    var temp = params.temperature != null ? params.temperature : 0.7;
+    var topP = params.topP != null ? params.topP : 1;
+    var maxTokens = params.maxTokens != null ? params.maxTokens : 8192;
+
+    var maxPresets = [
+      [2048, '2K (2,048)'], [4096, '4K (4,096)'], [8192, '8K (8,192)'],
+      [16384, '16K (16,384)'], [32768, '32K (32,768)'], [65536, '64K (65,536)'],
+      [131072, '128K (131,072)'], [262144, '256K (262,144)'], [393216, '384K (393,216)'],
+    ];
+    var fetched = LLM.models[provider] || [];
+    var modelOpts = fetched.map(function (m) {
+      return llmOptItem('model:' + m, m, m === model);
     }).join('');
-    if (!rows) rows = '<p class="sp-field-desc">' + t('llm.providers.desc') + '</p>';
+
+    function field(labelKey, inner, desc) {
+      return (
+        '<div class="sp-field"><label class="sp-label">' + t(labelKey) + '</label>' + inner +
+        (desc ? '<p class="sp-field-desc">' + desc + '</p>' : '') + '</div>'
+      );
+    }
+    return (
+      '<div class="sp-llm-grid">' +
+      field('llm.provider',
+        llmSelectHtml(llmProviderName(provider),
+          llmAllProviders().map(function (p) { return llmOptItem('provider:' + p.id, p.name, p.id === provider); }).join(''))) +
+      field('llm.model',
+        '<div class="sp-llm-modelrow">' +
+        '<input class="sp-input" data-llm-field="model" value="' + escLlm(model) + '" placeholder="' + t('llm.model') + '">' +
+        '<button type="button" data-llm-fetch-models="' + escLlm(provider) + '" class="sp-llm-btn"' + (LLM.fetching[provider] ? ' disabled' : '') + '>' +
+        (LLM.fetching[provider] ? t('llm.fetching') : t('llm.fetchModels')) + '</button>' +
+        '</div>' +
+        (fetched.length ? '<div class="sp-llm-modelrow" style="margin-top:0.375rem">' + llmSelectHtml(t('llm.chooseModel'), modelOpts) + '</div>' : '')) +
+      field('llm.temperature',
+        spSliderHtml('temperature', 0, 2, 0.05, temp),
+        '0(严谨) — 2(创意)') +
+      field('llm.topP',
+        spSliderHtml('topP', 0, 1, 0.01, topP),
+        '0(聚焦) — 1(全采样)') +
+      field('llm.maxTokens',
+        '<div class="sp-llm-modelrow">' +
+        '<input class="sp-input" data-llm-field="maxTokens" value="' + escLlm(llmFormatTokens(maxTokens)) + '" placeholder="如 8k / 0.5M">' +
+        llmSelectHtml(llmFormatTokens(maxTokens),
+          maxPresets.map(function (m) { return llmOptItem('maxtokens:' + m[0], m[1], Number(maxTokens) === m[0]); }).join('')) +
+        '</div>' +
+        '<p class="sp-field-desc">' + t('llm.maxTokensHint') + '</p>') +
+      field('llm.thinking',
+        llmSelectHtml(thinking,
+          ['none', 'low', 'medium', 'high', 'max'].map(function (v) { return llmOptItem('thinking:' + v, v, v === thinking); }).join(''))) +
+      field('llm.systemPrompt',
+        '<textarea class="sp-textarea" data-llm-field="prompt" rows="4" placeholder="' + t('llm.systemPromptPh') + '">' + escLlm(prompt) + '</textarea>',
+        t('llm.systemPromptHint')) +
+      '</div>' +
+      '<div class="sp-llm-savebar"><button type="button" data-llm-save-defaults class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
+      '<span class="sp-field-desc">' + t('llm.savedDesc') + '</span></div>'
+    );
+  }
+
+  function llmFormatTokens(n) {
+    n = Number(n);
+    if (!isFinite(n) || n <= 0) return '';
+    if (n % 1000000 === 0) return (n / 1000000) + 'M';
+    if (n % 1000 === 0) return (n / 1000) + 'K';
+    if (n > 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  /* ---------- 自研滑块(替代原生 range) ---------- */
+  var llmSlider = null;
+  function spSliderHtml(param, min, max, step, value) {
+    var pct = Math.round(((value - min) / (max - min)) * 100);
+    return (
+      '<div class="sp-slider-row">' +
+      '<div class="sp-slider" data-sp-slider="' + param + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '" data-value="' + value + '">' +
+      '<div class="sp-slider-track"><div class="sp-slider-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="sp-slider-thumb" style="left:' + pct + '%"></div>' +
+      '</div>' +
+      '<span class="sp-slider-val" data-sp-slider-val="' + param + '">' + Number(value).toFixed(2) + '</span>' +
+      '</div>'
+    );
+  }
+  function spSliderFromEvent(sl, e) {
+    var d = llmSlider;
+    if (!d) return;
+    var track = sl.querySelector('.sp-slider-track');
+    if (!track) return;
+    var rect = track.getBoundingClientRect();
+    var ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    var val = d.min + ratio * (d.max - d.min);
+    val = Math.max(d.min, Math.min(d.max, Math.round(val / d.step) * d.step));
+    sl.setAttribute('data-value', val);
+    var pct = ((val - d.min) / (d.max - d.min)) * 100;
+    var fill = sl.querySelector('.sp-slider-fill');
+    var thumb = sl.querySelector('.sp-slider-thumb');
+    if (fill) fill.style.width = pct + '%';
+    if (thumb) thumb.style.left = pct + '%';
+    var num = document.querySelector('[data-sp-slider-val="' + d.param + '"]');
+    if (num) num.textContent = Number(val).toFixed(2);
+    if (!LLM.defaults.params) LLM.defaults.params = {};
+    LLM.defaults.params[d.param] = val;
+  }
+
+  /* ---------- 下拉(替代原生 select,复用 [data-dropdown] 弹层机制) ---------- */
+  function llmSelectHtml(label, menuHtml) {
+    return (
+      '<div class="relative" data-dropdown>' +
+      '<button type="button" data-dropdown-trigger class="sp-select-trigger" aria-haspopup="listbox">' +
+      '<span class="sp-select-label">' + escLlm(label) + '</span>' +
+      '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
+      '</button>' +
+      '<div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-44') + '">' + menuHtml + '</div>' +
+      '</div>'
+    );
+  }
+  function llmOptItem(attrValue, label, active) {
+    return (
+      '<button type="button" role="option" data-llm-opt="' + escLlm(attrValue) + '" class="' +
+      App.ui.dropdownItemClass(active ? ' bg-accent text-accent-foreground' : '') + '">' +
+      '<span class="flex-1 text-left">' + escLlm(label) + '</span>' + (active ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>'
+    );
+  }
+
+  /* ---------- 供应商配置(内置 + 自定义卡片) ---------- */
+  function llmProvidersHtml(t) {
+    var all = llmAllProviders();
+    var defProvider = (LLM.defaults && LLM.defaults.provider) || '';
+    var cards = all.map(function (p) {
+      return llmProviderCardHtml(t, p, p.id === defProvider);
+    }).join('');
     var form = '';
     if (LLM.form && LLM.form.kind === 'provider') {
-      var editing = (LLM.providers || []).filter(function (p) { return p.id === LLM.form.id; })[0] || {};
+      var editing = (LLM.providers || []).filter(function (x) { return x.id === LLM.form.id; })[0] || {};
       form = llmProviderFormHtml(t, editing);
     }
     return (
-      '<div class="sp-llm-list">' + rows + '</div>' +
-      (form || '<button type="button" data-llm-add-provider class="sp-llm-btn is-primary">' + t('llm.addProvider') + '</button>')
+      '<div class="sp-llm-head">' +
+      '<h4>' + t('llm.providerCount') + ' (' + all.length + ')</h4>' +
+      (form ? '' : '<button type="button" data-llm-add-provider class="sp-llm-btn is-primary">' + t('llm.addProvider') + '</button>') +
+      '</div>' +
+      '<div class="sp-llm-cards">' + cards + '</div>' +
+      form
+    );
+  }
+
+  function llmProviderCardHtml(t, p, isDefault) {
+    var key = LLM.keys[p.id] || '';
+    var keySet = !!key;
+    var model = LLM.providerModels[p.id] || '';
+    var fetched = LLM.models[p.id] || [];
+    var ov = LLM.overrides[p.id] || {};
+    var fetching = LLM.fetching[p.id];
+    var busy = LLM.busy[p.id];
+    var modelOpts = fetched.map(function (m) { return llmOptItem('pmodel:' + p.id + ':' + m, m, m === model); }).join('');
+    var ovTemp = [['', t('llm.useGlobal')], ['0', '0'], ['0.5', '0.5'], ['0.7', '0.7'], ['1', '1'], ['1.5', '1.5'], ['2', '2']];
+    var ovTopP = [['', t('llm.useGlobal')], ['0', '0'], ['0.3', '0.3'], ['0.5', '0.5'], ['0.7', '0.7'], ['1', '1']];
+    var ovMax = [['', t('llm.useGlobal')], ['2048', '2K'], ['4096', '4K'], ['8192', '8K'], ['16384', '16K'], ['32768', '32K'], ['65536', '64K'], ['131072', '128K'], ['262144', '256K'], ['393216', '384K']];
+    function overSelect(pid, param, opts, current) {
+      var label = current != null && current !== '' ? opts.filter(function (o) { return o[0] === String(current); })[0] : null;
+      return llmSelectHtml(label ? label[1] : t('llm.useGlobal'),
+        opts.map(function (o) {
+          return llmOptItem('override:' + pid + ':' + param + ':' + o[0], o[1], o[0] === String(current));
+        }).join(''));
+    }
+    return (
+      '<div class="sp-llm-card' + (isDefault ? ' is-default' : '') + '">' +
+      '<div class="sp-llm-card-head">' +
+      '<span class="sp-llm-card-name">' + escLlm(p.name) + '</span>' +
+      (p.builtin
+        ? '<span class="sp-llm-badge">' + t('llm.builtin') + '</span>'
+        : '<span class="sp-llm-badge is-custom">' + t('llm.custom') + '</span>') +
+      (isDefault ? '<span class="sp-llm-badge is-active">' + t('llm.active') + '</span>' : '') +
+      (p.multimodal ? '<span class="sp-llm-badge is-mm">' + t('llm.multimodal') + '</span>' : '') +
+      (!p.builtin
+        ? '<span class="sp-llm-card-x">' +
+          '<button type="button" class="sp-llm-btn is-ghost" data-llm-edit-provider="' + escLlm(p.id) + '">' + t('llm.edit') + '</button>' +
+          '<button type="button" class="sp-llm-btn is-danger is-ghost" data-llm-del-provider="' + escLlm(p.id) + '">' + t('llm.delete') + '</button>' +
+          '</span>'
+        : '') +
+      '</div>' +
+      '<div class="sp-llm-card-body">' +
+      '<div class="sp-llm-card-row">' +
+      '<span class="sp-llm-card-label">' + t('llm.apiKey') + '</span>' +
+      '<input type="password" class="sp-input is-mono" data-llm-key="' + escLlm(p.id) + '" placeholder="sk-…" autocomplete="off" value="' + escLlm(key) + '">' +
+      '<span class="sp-llm-key-state' + (keySet ? ' is-set' : '') + '">' + (keySet ? t('llm.keySet') : t('llm.keyMissing')) + '</span>' +
+      (p.keyUrl ? '<a class="sp-llm-link" href="' + escLlm(p.keyUrl) + '" target="_blank" rel="noreferrer">' + t('llm.getKey') + '</a>' : '') +
+      '</div>' +
+      '<div class="sp-llm-card-row">' +
+      '<span class="sp-llm-card-label">Base URL</span>' +
+      '<code class="sp-llm-url">' + escLlm(p.baseUrl || t('llm.noBaseUrl')) + '</code>' +
+      '</div>' +
+      '<div class="sp-llm-card-row">' +
+      '<span class="sp-llm-card-label">' + t('llm.defaultModel') + '</span>' +
+      '<input class="sp-input is-mono" data-llm-pmodel="' + escLlm(p.id) + '" value="' + escLlm(model) + '" placeholder="' + t('llm.model') + '">' +
+      '<button type="button" data-llm-fetch-models="' + escLlm(p.id) + '" class="sp-llm-btn"' + (fetching ? ' disabled' : '') + '>' +
+      (fetching ? t('llm.fetching') : t('llm.fetchModels')) + '</button>' +
+      (modelOpts ? '<div style="min-width:9rem">' + llmSelectHtml(model || t('llm.chooseModel'), modelOpts) + '</div>' : '') +
+      '</div>' +
+      '<div class="sp-llm-card-over">' +
+      '<span class="sp-llm-card-label">' + t('llm.overrides') + '</span>' +
+      '<div class="sp-llm-over-row">' +
+      overSelect(p.id, 'temperature', ovTemp, ov.temperature) +
+      overSelect(p.id, 'topP', ovTopP, ov.topP) +
+      overSelect(p.id, 'maxTokens', ovMax, ov.maxTokens) +
+      '</div>' +
+      '</div>' +
+      '<div class="sp-llm-card-foot">' +
+      '<button type="button" class="sp-llm-btn" data-llm-balance="' + escLlm(p.id) + '"' + (busy ? ' disabled' : '') + '>' +
+      (busy ? t('llm.querying') : t('llm.balance')) + '</button>' +
+      (p.note ? '<span class="sp-field-desc">' + escLlm(p.note) + '</span>' : '') +
+      '</div>' +
+      '</div>' +
+      '</div>'
     );
   }
 
@@ -1002,35 +1237,39 @@
     );
   }
 
-  function llmKeysHtml(t) {
-    var rows = llmAllProviders().map(function (p) {
-      return (
-        '<div class="sp-field"><label class="sp-label">' + escLlm(p.name) + '</label>' +
-        '<input type="password" class="sp-input" data-llm-key="' + escLlm(p.id) + '" placeholder="API Key" autocomplete="off" value="' + escLlm(LLM.keys[p.id] || '') + '"></div>'
-      );
-    }).join('');
-    return (
-      '<div class="sp-llm-grid">' + rows + '</div>' +
-      '<div class="sp-llm-savebar"><button type="button" data-llm-save-keys class="sp-llm-btn is-primary">' + t('llm.save') + '</button></div>'
-    );
-  }
-
+  /* ---------- MCP 服务器(https / sse,工具列表可拉取) ---------- */
   function llmMcpHtml(t) {
     var rows = (LLM.mcp || []).map(function (s) {
+      var tools = s.tools || [];
+      var busy = LLM.busy[s.id];
       return (
-        '<div class="sp-llm-row"><div class="sp-llm-row-main"><span class="sp-label">' + escLlm(s.name) + '</span>' +
-        '<span class="sp-field-desc">' + escLlm(s.url) + ' · ' + escLlm(s.protocol || 'https') + '</span></div>' +
-        '<div class="sp-llm-row-actions">' +
+        '<div class="sp-llm-card">' +
+        '<div class="sp-llm-card-head">' +
+        '<span class="sp-llm-badge is-proto">' + escLlm(s.protocol || 'https') + '</span>' +
+        '<span class="sp-llm-card-name">' + escLlm(s.name || s.id) + '</span>' +
+        (tools.length ? '<span class="sp-llm-badge">' + tools.length + ' ' + t('llm.tools') + '</span>' : '') +
+        '<span class="sp-llm-card-x">' +
         '<span role="switch" aria-checked="' + (!!s.enabled) + '" class="sp-switch' + (s.enabled ? ' is-on' : '') + '" data-llm-mcp-toggle="' + escLlm(s.id) + '"></span>' +
-        '<button type="button" data-llm-edit-mcp="' + escLlm(s.id) + '" class="sp-llm-btn">' + t('llm.edit') + '</button>' +
-        '<button type="button" data-llm-del-mcp="' + escLlm(s.id) + '" class="sp-llm-btn is-danger">' + t('llm.delete') + '</button>' +
-        '</div></div>'
+        '<button type="button" class="sp-llm-btn" data-llm-mcp-tools="' + escLlm(s.id) + '"' + (busy ? ' disabled' : '') + '>' +
+        (busy ? t('llm.fetching') : t('llm.fetchTools')) + '</button>' +
+        '<button type="button" class="sp-llm-btn is-ghost" data-llm-edit-mcp="' + escLlm(s.id) + '">' + t('llm.edit') + '</button>' +
+        '<button type="button" class="sp-llm-btn is-danger is-ghost" data-llm-del-mcp="' + escLlm(s.id) + '">' + t('llm.delete') + '</button>' +
+        '</span>' +
+        '</div>' +
+        '<div class="sp-llm-card-body">' +
+        '<div class="sp-llm-card-row"><span class="sp-llm-card-label">URL</span><code class="sp-llm-url">' + escLlm(s.url) + '</code></div>' +
+        (tools.length
+          ? '<div class="sp-llm-tools">' + tools.slice(0, 6).map(function (tt) { return '<span class="sp-llm-tool-chip">' + escLlm(tt.name) + '</span>'; }).join('') +
+            (tools.length > 6 ? '<span class="sp-field-desc">+ ' + (tools.length - 6) + '</span>' : '') + '</div>'
+          : '') +
+        '</div>' +
+        '</div>'
       );
     }).join('');
     if (!rows) rows = '<p class="sp-field-desc">' + t('llm.mcp.desc') + '</p>';
     var form = '';
     if (LLM.form && LLM.form.kind === 'mcp') {
-      var editing = (LLM.mcp || []).filter(function (s) { return s.id === LLM.form.id; })[0] || {};
+      var editing = (LLM.mcp || []).filter(function (x) { return x.id === LLM.form.id; })[0] || {};
       form = llmMcpFormHtml(t, editing);
     }
     return (
@@ -1053,97 +1292,71 @@
     );
   }
 
-  function llmDropdown(t, name, options, value, attr) {
-    var sel = options.filter(function (o) { return o.value === value; })[0] || options[0];
-    var opts = options.map(function (o) {
+  /* ---------- 联网搜索 ---------- */
+  function llmSearchHtml(t) {
+    var search = LLM.search || {};
+    var provider = search.provider || 'duckduckgo';
+    var results = Math.max(3, Math.min(15, Number(search.results) || 6));
+    var SEARCH_ENGINES = [
+      { id: 'duckduckgo', name: 'DuckDuckGo', free: t('llm.searchDdg'), keyUrl: '' },
+      { id: 'serper', name: 'Serper', free: t('llm.searchSerper'), keyUrl: 'https://serper.dev' },
+      { id: 'tavily', name: 'Tavily', free: t('llm.searchTavily'), keyUrl: 'https://tavily.com' },
+      { id: 'bing', name: 'Bing Search', free: t('llm.searchBing'), keyUrl: 'https://www.microsoft.com/en-us/bing/apis/bing-web-search-api' },
+      { id: 'google', name: 'Google Custom Search', free: t('llm.searchGoogle'), keyUrl: 'https://developers.google.com/custom-search/v1/overview' },
+    ];
+    var cards = SEARCH_ENGINES.map(function (se) {
       return (
-        '<button type="button" role="option" ' + attr + '="' + escLlm(o.value) + '" class="' +
-        App.ui.dropdownItemClass(o.value === value ? ' bg-accent text-accent-foreground' : '') + '">' +
-        '<span class="flex-1 text-left">' + escLlm(o.label) + '</span>' +
-        (o.value === value ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>'
+        '<button type="button" class="sp-llm-search-card' + (se.id === provider ? ' is-active' : '') + '" data-llm-search-provider="' + se.id + '">' +
+        '<span class="sp-llm-search-name">' + escLlm(se.name) + '</span>' +
+        (se.id === provider ? '<span class="sp-llm-badge is-active">' + t('llm.searchSelected') + '</span>' : '') +
+        '<span class="sp-field-desc">' + se.free + '</span>' +
+        (se.keyUrl ? '<a class="sp-llm-link" href="' + se.keyUrl + '" target="_blank" rel="noreferrer">' + t('llm.searchApply') + '</a>' : '') +
+        '</button>'
       );
     }).join('');
     return (
-      '<div class="relative" data-dropdown>' +
-      '<button type="button" data-dropdown-trigger class="sp-select-trigger" aria-haspopup="listbox">' +
-      '<span class="sp-select-label">' + escLlm(sel.label) + '</span>' +
-      '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
-      '</button>' +
-      '<div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + opts + '</div>' +
+      '<div class="sp-llm-search-grid">' + cards + '</div>' +
+      '<div class="sp-llm-searchbar">' +
+      '<span class="sp-label">' + t('llm.searchResults') + '</span>' +
+      '<div class="sp-llm-stepper">' +
+      '<button type="button" class="sp-llm-btn" data-llm-search-dec aria-label="−">−</button>' +
+      '<span class="sp-llm-stepper-val">' + results + ' ' + t('llm.searchItems') + '</span>' +
+      '<button type="button" class="sp-llm-btn" data-llm-search-inc aria-label="+">+</button>' +
+      '</div>' +
+      '<span class="sp-field-desc">3–15</span>' +
       '</div>'
     );
   }
 
-  function llmDefaultsHtml(t) {
-    var d = LLM.defaults || {};
-    var params = d.params || {};
-    var provider = d.provider || 'opencode-go';
-    var model = d.model || '';
-    var thinking = d.thinking || 'none';
-    var modelOpts = '';
-    if (LLM.models && LLM.models.length) {
-      modelOpts = LLM.models.map(function (m) {
-        return '<button type="button" role="option" data-llm-model-opt="' + escLlm(m) + '" class="' +
-          App.ui.dropdownItemClass(m === model ? ' bg-accent text-accent-foreground' : '') + '">' +
-          '<span class="flex-1 text-left">' + escLlm(m) + '</span>' + (m === model ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>';
-      }).join('');
-    }
-    var providerOpts = llmAllProviders().map(function (p) {
-      return '<button type="button" role="option" data-llm-provider-opt="' + escLlm(p.id) + '" class="' +
-        App.ui.dropdownItemClass(p.id === provider ? ' bg-accent text-accent-foreground' : '') + '">' +
-        '<span class="flex-1 text-left">' + escLlm(p.name) + '</span>' + (p.id === provider ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>';
-    }).join('');
-    var thinkOpts = ['none', 'low', 'medium', 'high'].map(function (v) {
-      return '<button type="button" role="option" data-llm-thinking-opt="' + v + '" class="' +
-        App.ui.dropdownItemClass(v === thinking ? ' bg-accent text-accent-foreground' : '') + '">' +
-        '<span class="flex-1 text-left">' + v + '</span>' + (v === thinking ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>';
-    }).join('');
-
-    function field(labelKey, inner) {
-      return '<div class="sp-field"><label class="sp-label">' + t(labelKey) + '</label>' + inner + '</div>';
-    }
-    function numField(labelKey, key, val, placeholder) {
-      return field(labelKey, '<input class="sp-input" data-llm-field="' + key + '" value="' + escLlm(val) + '" placeholder="' + escLlm(placeholder) + '">');
-    }
-    return (
-      '<div class="sp-llm-grid">' +
-      field('llm.provider',
-        '<div class="relative" data-dropdown><button type="button" data-dropdown-trigger class="sp-select-trigger">' +
-        '<span class="sp-select-label">' + escLlm(llmProviderName(provider)) + '</span>' +
-        '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
-        '</button><div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + providerOpts + '</div></div>') +
-      field('llm.model',
-        '<div class="sp-llm-modelrow"><input class="sp-input" data-llm-field="model" value="' + escLlm(model) + '" placeholder="' + t('llm.model') + '">' +
-        '<button type="button" data-llm-fetch-models class="sp-llm-btn" ' + (LLM.fetchingModels ? 'disabled' : '') + '>' + t('llm.fetchModels') + '</button></div>' +
-        (modelOpts ? '<div class="relative" data-dropdown style="margin-top:0.375rem"><button type="button" data-dropdown-trigger class="sp-select-trigger"><span class="sp-select-label">选择模型…</span><svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button><div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + modelOpts + '</div></div>' : '')) +
-      numField('llm.temperature', 'temperature', params.temperature != null ? params.temperature : 0.7, '0-2'),
-      numField('llm.topP', 'topP', params.topP != null ? params.topP : 1, '0-1'),
-      numField('llm.topK', 'topK', params.topK != null ? params.topK : 0, '0-1000'),
-      numField('llm.maxTokens', 'maxTokens', params.maxTokens != null ? params.maxTokens : 8192, '如 8k / 1M'),
-      field('llm.thinking',
-        '<div class="relative" data-dropdown><button type="button" data-dropdown-trigger class="sp-select-trigger"><span class="sp-select-label">' + thinking + '</span>' +
-        '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
-        '</button><div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + thinkOpts + '</div></div>') +
-      '</div>' +
-      '<div class="sp-llm-savebar"><button type="button" data-llm-save-defaults class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
-      '<span class="sp-field-desc">' + t('llm.savedDesc') + '</span></div>'
-    );
-  }
-
   function loadLlmPage() {
-    App.api.get('/api/settings').then(function (raw) {
-      LLM.providers = llmParseArr(raw['llm:providers']);
-      LLM.mcp = llmParseArr(raw['llm:mcp']);
-      LLM.defaults = llmParseObj(raw['llm:defaults']);
-      LLM.keys = llmParseObj(raw['llm:apikeys']);
-      LLM.loaded = true;
-      LLM.error = null;
-      renderLlmPage();
-    }).catch(function (e) {
-      LLM.loaded = true;
-      LLM.error = (e && e.message) || '加载失败';
-      renderLlmPage();
-    });
+    App.api
+      .get('/api/chat/providers')
+      .then(function (catData) {
+        LLM.catalog = (catData && catData.providers) || [];
+        return App.api.get('/api/settings');
+      })
+      .catch(function () {
+        LLM.catalog = [];
+        return App.api.get('/api/settings');
+      })
+      .then(function (raw) {
+        LLM.providers = llmParseArr(raw['llm:providers']);
+        LLM.mcp = llmParseArr(raw['llm:mcp']);
+        LLM.defaults = llmParseObj(raw['llm:defaults']);
+        LLM.keys = llmParseObj(raw['llm:apikeys']);
+        LLM.overrides = llmParseObj(raw['llm:overrides']);
+        LLM.search = llmParseObj(raw['llm:search']);
+        LLM.providerModels = llmParseObj(raw['llm:providerModels']);
+        LLM.models = llmParseObj(raw['llm:models']);
+        LLM.loaded = true;
+        LLM.error = null;
+        renderLlmPage();
+      })
+      .catch(function (e) {
+        LLM.loaded = true;
+        LLM.error = (e && e.message) || '加载失败';
+        renderLlmPage();
+      });
   }
 
   function llmSave(next) {
@@ -1152,12 +1365,20 @@
       'llm:mcp': JSON.stringify(next.mcp || []),
       'llm:defaults': JSON.stringify(next.defaults || {}),
       'llm:apikeys': JSON.stringify(next.keys || {}),
+      'llm:overrides': JSON.stringify(next.overrides || {}),
+      'llm:search': JSON.stringify(next.search || {}),
+      'llm:providerModels': JSON.stringify(next.providerModels || {}),
+      'llm:models': JSON.stringify(next.models || {}),
     };
     App.api.put('/api/settings', { settings: payload }).then(function () {
       LLM.providers = next.providers || [];
       LLM.mcp = next.mcp || [];
       LLM.defaults = next.defaults || {};
       LLM.keys = next.keys || {};
+      LLM.overrides = next.overrides || {};
+      LLM.search = next.search || {};
+      LLM.providerModels = next.providerModels || {};
+      LLM.models = next.models || {};
       App.ui.toast(moduleT()('llm.saved'));
       renderLlmPage();
     }).catch(function (e) {
@@ -1168,10 +1389,106 @@
   function llmClone() {
     return {
       providers: (LLM.providers || []).slice(),
-      mcp: (LLM.mcp || []).slice(),
+      mcp: JSON.parse(JSON.stringify(LLM.mcp || [])),
       defaults: JSON.parse(JSON.stringify(LLM.defaults || {})),
       keys: Object.assign({}, LLM.keys || {}),
+      overrides: JSON.parse(JSON.stringify(LLM.overrides || {})),
+      search: Object.assign({}, LLM.search || {}),
+      providerModels: Object.assign({}, LLM.providerModels || {}),
+      models: JSON.parse(JSON.stringify(LLM.models || {})),
     };
+  }
+
+  /** 把默认参数面板里正在编辑的输入同步回内存(下拉/重渲染前调用,避免丢输入) */
+  function llmSyncDefaultsFromDom() {
+    var d = LLM.defaults || {};
+    LLM.defaults = d;
+    var modelEl = document.querySelector('[data-llm-field="model"]');
+    if (modelEl) d.model = modelEl.value.trim();
+    var promptEl = document.querySelector('[data-llm-field="prompt"]');
+    if (promptEl) d.prompt = promptEl.value;
+    var params = d.params || {};
+    d.params = params;
+    var mt = document.querySelector('[data-llm-field="maxTokens"]');
+    if (mt && mt.value.trim() !== '') {
+      var parsed = llmParseTokens(mt.value);
+      if (parsed != null) params.maxTokens = parsed;
+    }
+  }
+
+  function llmFetchModelsFor(pid) {
+    llmSyncDefaultsFromDom();
+    var key = LLM.keys[pid] || '';
+    LLM.fetching[pid] = true;
+    renderLlmPage();
+    App.api
+      .post('/api/chat/models', { providerId: pid, apiKey: key })
+      .then(function (data) {
+        var list = (data && data.models) || [];
+        var next = llmClone();
+        next.models = Object.assign({}, next.models, {});
+        next.models[pid] = list;
+        if (LLM.defaults.provider === pid && list.length && !LLM.defaults.model) next.defaults.model = list[0];
+        LLM.fetching[pid] = false;
+        llmSave(next);
+      })
+      .catch(function (e) {
+        LLM.fetching[pid] = false;
+        LLM.models = Object.assign({}, LLM.models, {});
+        LLM.models[pid] = [];
+        App.ui.toast((e && e.message) || '获取模型失败', 'error');
+        renderLlmPage();
+      });
+  }
+
+  function llmCheckBalance(pid) {
+    var key = LLM.keys[pid] || '';
+    LLM.busy[pid] = true;
+    renderLlmPage();
+    App.api
+      .post('/api/chat/balance', { providerId: pid, apiKey: key })
+      .then(function (data) {
+        LLM.busy[pid] = false;
+        var bal = data && data.balance;
+        var cur = (data && data.currency) || '';
+        var text = '余额: ' + (Number.isFinite(Number(bal)) ? Number(bal).toLocaleString() : (bal || '-')) + (cur ? ' ' + cur : '');
+        App.ui.toast(text);
+        renderLlmPage();
+      })
+      .catch(function (e) {
+        LLM.busy[pid] = false;
+        App.ui.toast((e && e.message) || '查询余额失败', 'error');
+        renderLlmPage();
+      });
+  }
+
+  function llmFetchMcpTools(id) {
+    var entry = (LLM.mcp || []).filter(function (s) { return s.id === id; })[0];
+    if (!entry) return;
+    LLM.busy[id] = true;
+    renderLlmPage();
+    App.api
+      .post('/api/chat/mcp/tools', { url: entry.url, protocol: entry.protocol, headers: entry.headers })
+      .then(function (data) {
+        var list = (data && data.tools) || [];
+        var next = llmClone();
+        next.mcp = next.mcp.map(function (s) {
+          if (s.id !== id) return s;
+          return Object.assign({}, s, {
+            tools: list.map(function (tt) {
+              return { name: tt.name, description: tt.description || '', enabled: true };
+            }),
+          });
+        });
+        LLM.busy[id] = false;
+        App.ui.toast('已获取 ' + list.length + ' 个工具');
+        llmSave(next);
+      })
+      .catch(function (e) {
+        LLM.busy[id] = false;
+        App.ui.toast('获取工具失败: ' + ((e && e.message) || ''), 'error');
+        renderLlmPage();
+      });
   }
 
   function llmUid(prefix) {
@@ -1312,25 +1629,6 @@
     return Math.round(num * mult);
   }
 
-  /** 把默认参数面板里正在编辑的文本输入同步回内存,避免下拉选项点击重渲染时丢输入 */
-  function llmSyncDefaultsFromDom() {
-    var d = LLM.defaults || {};
-    LLM.defaults = d;
-    var modelEl = document.querySelector('[data-llm-field="model"]');
-    if (modelEl) d.model = modelEl.value.trim();
-    var params = d.params || {};
-    d.params = params;
-    ['temperature', 'topP', 'topK'].forEach(function (k) {
-      var el = document.querySelector('[data-llm-field="' + k + '"]');
-      if (el && el.value !== '') params[k] = llmNum(el.value, params[k] == null ? 0 : params[k]);
-    });
-    var mt = document.querySelector('[data-llm-field="maxTokens"]');
-    if (mt && mt.value !== '') {
-      var parsed = llmParseTokens(mt.value);
-      if (parsed != null) params.maxTokens = parsed;
-    }
-  }
-
   function llmSaveProvider() {
     var name = llmField('name').trim();
     var baseUrl = llmField('base').trim();
@@ -1392,46 +1690,12 @@
     llmSave(llmClone());
   }
 
-  function llmSaveKeys() {
-    var next = llmClone();
-    var keys = {};
-    document.querySelectorAll('[data-llm-key]').forEach(function (el) {
-      var id = el.getAttribute('data-llm-key');
-      var val = el.value.trim();
-      if (val) keys[id] = val;
-    });
-    next.keys = keys;
-    llmSave(next);
-  }
-
-  function llmFetchModels() {
-    llmSyncDefaultsFromDom();
-    var provider = LLM.defaults.provider || 'opencode-go';
-    var key = LLM.keys[provider] || '';
-    LLM.fetchingModels = true;
-    renderLlmPage();
-    App.api
-      .post('/api/chat/models', { providerId: provider, apiKey: key })
-      .then(function (data) {
-        LLM.models = (data && data.models) || [];
-        LLM.fetchingModels = false;
-        if (LLM.models.length && !LLM.defaults.model) LLM.defaults.model = LLM.models[0];
-        renderLlmPage();
-      })
-      .catch(function (e) {
-        LLM.fetchingModels = false;
-        LLM.models = [];
-        App.ui.toast((e && e.message) || '获取模型失败', 'error');
-        renderLlmPage();
-      });
-  }
-
   document.addEventListener('app:afterRender', function (ev) {
     var detail = ev.detail || {};
     if (detail.path !== '/settings/llm') return;
     LLM.form = null;
-    LLM.models = null;
-    LLM.fetchingModels = false;
+    LLM.fetching = {};
+    LLM.busy = {};
     loadLlmPage();
   });
 
@@ -1489,35 +1753,132 @@
     var cancelForm = target.closest('[data-llm-cancel-form]');
     if (cancelForm) { LLM.form = null; renderLlmPage(); return; }
 
-    var saveKeys = target.closest('[data-llm-save-keys]');
-    if (saveKeys) { llmSaveKeys(); return; }
     var fetchModels = target.closest('[data-llm-fetch-models]');
-    if (fetchModels) { llmFetchModels(); return; }
+    if (fetchModels) {
+      llmFetchModelsFor(fetchModels.getAttribute('data-llm-fetch-models'));
+      return;
+    }
     var saveDefaults = target.closest('[data-llm-save-defaults]');
     if (saveDefaults) { llmSaveDefaults(); return; }
 
-    var providerOpt = target.closest('[data-llm-provider-opt]');
-    if (providerOpt) {
-      llmSyncDefaultsFromDom();
-      LLM.defaults.provider = providerOpt.getAttribute('data-llm-provider-opt');
-      LLM.models = null;
-      renderLlmPage();
+    var balance = target.closest('[data-llm-balance]');
+    if (balance) { llmCheckBalance(balance.getAttribute('data-llm-balance')); return; }
+    var mcpTools = target.closest('[data-llm-mcp-tools]');
+    if (mcpTools) { llmFetchMcpTools(mcpTools.getAttribute('data-llm-mcp-tools')); return; }
+
+    var searchP = target.closest('[data-llm-search-provider]');
+    if (searchP) {
+      var nextS = llmClone();
+      nextS.search = Object.assign({}, nextS.search, { provider: searchP.getAttribute('data-llm-search-provider') });
+      llmSave(nextS);
       return;
     }
-    var modelOpt = target.closest('[data-llm-model-opt]');
-    if (modelOpt) {
-      llmSyncDefaultsFromDom();
-      LLM.defaults.model = modelOpt.getAttribute('data-llm-model-opt');
-      renderLlmPage();
+    var searchDec = target.closest('[data-llm-search-dec]');
+    if (searchDec) {
+      var nextD = llmClone();
+      nextD.search = Object.assign({}, nextD.search, { results: Math.max(3, (Number(nextD.search.results) || 6) - 1) });
+      llmSave(nextD);
       return;
     }
-    var thinkingOpt = target.closest('[data-llm-thinking-opt]');
-    if (thinkingOpt) {
-      llmSyncDefaultsFromDom();
-      LLM.defaults.thinking = thinkingOpt.getAttribute('data-llm-thinking-opt');
-      renderLlmPage();
+    var searchInc = target.closest('[data-llm-search-inc]');
+    if (searchInc) {
+      var nextI = llmClone();
+      nextI.search = Object.assign({}, nextI.search, { results: Math.min(15, (Number(nextI.search.results) || 6) + 1) });
+      llmSave(nextI);
       return;
     }
+
+    // 统一下拉选项(provider/thinking/maxtokens/model/pmodel/override 均经 data-llm-opt 编码)
+    var opt = target.closest('[data-llm-opt]');
+    if (opt) {
+      var raw = opt.getAttribute('data-llm-opt') || '';
+      var parts = raw.split(':');
+      var kind = parts.shift();
+      if (kind === 'provider') {
+        llmSyncDefaultsFromDom();
+        LLM.defaults.provider = parts.join(':');
+        renderLlmPage();
+      } else if (kind === 'thinking') {
+        llmSyncDefaultsFromDom();
+        LLM.defaults.thinking = parts[0];
+        renderLlmPage();
+      } else if (kind === 'maxtokens') {
+        llmSyncDefaultsFromDom();
+        if (!LLM.defaults.params) LLM.defaults.params = {};
+        LLM.defaults.params.maxTokens = parseInt(parts[0], 10);
+        renderLlmPage();
+      } else if (kind === 'model') {
+        llmSyncDefaultsFromDom();
+        LLM.defaults.model = parts.join(':');
+        renderLlmPage();
+      } else if (kind === 'pmodel') {
+        var ppid = parts[0];
+        var pmodel = parts.slice(1).join(':');
+        var nextPm = llmClone();
+        if (pmodel) nextPm.providerModels[ppid] = pmodel;
+        else delete nextPm.providerModels[ppid];
+        if (nextPm.defaults.provider === ppid) nextPm.defaults.model = pmodel || '';
+        llmSave(nextPm);
+      } else if (kind === 'override') {
+        var opid = parts[0];
+        var oparam = parts[1];
+        var oval = parts.slice(2).join(':');
+        var nextOv = llmClone();
+        nextOv.overrides[opid] = nextOv.overrides[opid] || {};
+        if (oval === '') delete nextOv.overrides[opid][oparam];
+        else nextOv.overrides[opid][oparam] = Number(oval);
+        if (!Object.keys(nextOv.overrides[opid]).length) delete nextOv.overrides[opid];
+        llmSave(nextOv);
+      }
+      return;
+    }
+  });
+
+  /* 供应商卡片:API Key / 默认模型 输入失焦即自动保存 */
+  document.addEventListener('change', function (e) {
+    var el = e.target;
+    if (!el || !el.matches) return;
+    if (el.matches('[data-llm-key]')) {
+      var kid = el.getAttribute('data-llm-key');
+      var v = el.value.trim();
+      var nextK = llmClone();
+      if (v) nextK.keys[kid] = v;
+      else delete nextK.keys[kid];
+      llmSave(nextK);
+      return;
+    }
+    if (el.matches('[data-llm-pmodel]')) {
+      var pmId = el.getAttribute('data-llm-pmodel');
+      var pmVal = el.value.trim();
+      var nextPM = llmClone();
+      if (pmVal) nextPM.providerModels[pmId] = pmVal;
+      else delete nextPM.providerModels[pmId];
+      if (nextPM.defaults.provider === pmId) nextPM.defaults.model = pmVal || '';
+      llmSave(nextPM);
+      return;
+    }
+  });
+
+  /* 设置页自研滑块(替代原生 range) */
+  document.addEventListener('pointerdown', function (e) {
+    var sl = e.target.closest ? e.target.closest('[data-sp-slider]') : null;
+    if (!sl) return;
+    e.preventDefault();
+    llmSlider = {
+      param: sl.getAttribute('data-sp-slider'),
+      min: parseFloat(sl.getAttribute('data-min')),
+      max: parseFloat(sl.getAttribute('data-max')),
+      step: parseFloat(sl.getAttribute('data-step')),
+    };
+    spSliderFromEvent(sl, e);
+  });
+  document.addEventListener('pointermove', function (e) {
+    if (!llmSlider) return;
+    var sl = document.querySelector('[data-sp-slider="' + llmSlider.param + '"]');
+    if (sl) spSliderFromEvent(sl, e);
+  });
+  document.addEventListener('pointerup', function () {
+    llmSlider = null;
   });
 
   App.defineModule({ id: 'settings', render: render });

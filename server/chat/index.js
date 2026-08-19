@@ -56,9 +56,11 @@ function defaultConfig() {
       model: 'mimo-v2.5',
       promptId: '',
       params: { temperature: 0.7, topP: 1, topK: 0, maxTokens: 8192, presencePenalty: 0, frequencyPenalty: 0 },
-      thinking: 'none', // none / low / medium / high
+      thinking: 'none', // none / low / medium / high / max
+      prompt: '', // 全局默认系统提示词(promptId 未设置时生效)
       webSearch: false,
       webSearchProvider: 'duckduckgo',
+      searchResults: 6, // 每次联网搜索返回结果条数(3-15)
       mcpEnabled: true,
     },
     prompts: BUILTIN_PROMPTS.map(function (p) {
@@ -165,7 +167,9 @@ function createChat(deps) {
       if (typeof d.webSearchProvider === 'string') cfg.defaults.webSearchProvider = d.webSearchProvider;
       cfg.defaults.webSearch = !!d.webSearch;
       cfg.defaults.mcpEnabled = d.mcpEnabled !== false;
-      if (['none', 'low', 'medium', 'high'].indexOf(d.thinking) !== -1) cfg.defaults.thinking = d.thinking;
+      cfg.defaults.searchResults = clampNum(d.searchResults, 3, 15, 6);
+      if (typeof d.prompt === 'string') cfg.defaults.prompt = d.prompt.slice(0, 20000);
+      if (['none', 'low', 'medium', 'high', 'max'].indexOf(d.thinking) !== -1) cfg.defaults.thinking = d.thinking;
       if (isPlainObject(d.params)) {
         const p = d.params;
         cfg.defaults.params = {
@@ -241,13 +245,28 @@ function createChat(deps) {
     const gMcp = parseJson(global['llm:mcp'], null);
     const gDefaults = parseJson(global['llm:defaults'], null);
     const gKeys = parseJson(global['llm:apikeys'], null);
+    const gOverrides = parseJson(global['llm:overrides'], null);
+    const gSearch = parseJson(global['llm:search'], null);
     const merged = isPlainObject(local) ? Object.assign({}, local) : defaultConfig();
     if (Array.isArray(gProviders)) merged.providers = gProviders;
     if (Array.isArray(gMcp)) merged.mcp = gMcp;
     if (isPlainObject(gDefaults)) {
+      // 模块级 defaults 优先,全局仅在模块未设置时作为默认继承;
+      // 会话级覆盖仍按会话保存在 chat_conversations 中,优先级最高。
       merged.defaults = Object.assign({}, gDefaults, merged.defaults || {});
     }
     const config = normalizeConfig(merged);
+    if (isPlainObject(gOverrides)) config.providerOverrides = gOverrides;
+    if (isPlainObject(gSearch)) {
+      if (typeof gSearch.provider === 'string' && gSearch.provider) {
+        config.defaults.webSearchProvider = gSearch.provider;
+        merged.defaults.webSearchProvider = gSearch.provider;
+      }
+      if (Number(gSearch.results)) {
+        config.defaults.searchResults = clampNum(gSearch.results, 3, 15, 6);
+        merged.defaults.searchResults = config.defaults.searchResults;
+      }
+    }
 
     let secrets = row && row.secrets ? parseJson(decrypt(row.secrets), {}) : {};
     if (!isPlainObject(secrets)) secrets = {};
@@ -305,11 +324,13 @@ function createChat(deps) {
       }
       const item = { role: role, content: content };
       if (role === 'assistant' && Array.isArray(m.tool_calls)) {
+        // 内存中的 tool_calls 统一为 OpenAI 嵌套结构 { id, type, function: { name, arguments } }
         item.tool_calls = m.tool_calls.map(function (tc) {
+          const fn = (tc && tc.function) || tc || {};
           return {
             id: tc.id || uid('call'),
             type: 'function',
-            function: { name: tc.name, arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments || {}) },
+            function: { name: fn.name, arguments: typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments || {}) },
           };
         });
         if (item.content === '') item.content = null;
@@ -321,6 +342,76 @@ function createChat(deps) {
       out.push(item);
     });
     return out;
+  }
+
+  /* ---------- 供应商目录 / 余额 / MCP 工具发现 ---------- */
+  function listCatalog() {
+    return require('./providers').PROVIDERS.map(function (pr) {
+      return {
+        id: pr.id,
+        name: pr.name,
+        kind: pr.kind,
+        baseUrl: pr.baseUrl,
+        models: pr.models || [],
+        multimodal: !!pr.multimodal,
+        keyUrl: pr.keyUrl || '',
+        note: pr.note || '',
+      };
+    });
+  }
+
+  async function checkBalance(providerId, apiKey) {
+    const { config } = await loadAll();
+    const provider = resolveProvider(config, providerId);
+    if (!provider) throw new Error('未知供应商: ' + providerId);
+    const key = apiKey || '';
+    const base = (provider.baseUrl || '').replace(/\/+$/, '');
+    if (provider.kind === 'anthropic') {
+      throw new Error('该供应商暂不支持公开余额查询');
+    }
+    if (!key) throw new Error('未配置 API Key,无法查询余额');
+    const attempts = [
+      { url: base + '/user/balance', kind: 'balance' },
+      { url: base + '/dashboard/billing/credit_grants', kind: 'grants' },
+    ];
+    let lastErr = '';
+    for (const a of attempts) {
+      try {
+        const res = await fetchImpl(a.url, { headers: { Authorization: 'Bearer ' + key } });
+        if (!res.ok) { lastErr = 'HTTP ' + res.status; continue; }
+        const data = await res.json();
+        if (a.kind === 'balance') {
+          const infos = data.balance_infos || [];
+          const total = infos
+            .map(function (i) { return Number(i.total_balance) || 0; })
+            .reduce(function (x, y) { return x + y; }, 0);
+          const currency = (infos[0] && infos[0].currency) || '';
+          if (infos.length || data.is_available != null) {
+            return { providerId, balance: total, currency, raw: data };
+          }
+          lastErr = '未知响应结构';
+          continue;
+        }
+        const avail = data.total_available != null ? data.total_available : data.total_granted;
+        if (avail != null) {
+          return { providerId, balance: Number(avail), currency: 'USD', raw: data };
+        }
+        lastErr = '未知响应结构';
+      } catch (e) {
+        lastErr = (e && e.message) || String(e);
+      }
+    }
+    throw new Error('查询余额失败: ' + lastErr);
+  }
+
+  async function listMcpTools(input) {
+    const server = {
+      url: String((input && input.url) || '').trim(),
+      protocol: (input && input.protocol === 'sse') ? 'sse' : 'https',
+      headers: (input && isPlainObject(input.headers)) ? input.headers : undefined,
+    };
+    if (!server.url) throw new Error('MCP URL 必填');
+    return mcp.listTools(server);
   }
 
   /* ---------- 模型列表 ---------- */
@@ -363,6 +454,7 @@ function createChat(deps) {
     if (level === 'low') return 1024;
     if (level === 'medium') return 4096;
     if (level === 'high') return 8192;
+    if (level === 'max') return 16384;
     return 0;
   }
 
@@ -381,7 +473,7 @@ function createChat(deps) {
       body.tool_choice = 'auto';
     }
     if (o.providerId === 'openai' && o.thinking && o.thinking !== 'none') {
-      body.reasoning_effort = o.thinking;
+      body.reasoning_effort = o.thinking === 'max' ? 'high' : o.thinking;
     }
     return body;
   }
@@ -400,11 +492,14 @@ function createChat(deps) {
       }
     });
     (toolUses || []).forEach(function (tc) {
+      // 兼容嵌套(OpenAI)与扁平两种 tool_calls 结构
+      const fn = (tc && tc.function) || tc || {};
+      const rawArgs = fn.arguments != null ? fn.arguments : tc.arguments;
       blocks.push({
         type: 'tool_use',
         id: tc.id || uid('toolu'),
-        name: tc.name,
-        input: tc.arguments && typeof tc.arguments === 'object' ? tc.arguments : parseJson(tc.arguments, {}),
+        name: fn.name || tc.name || '',
+        input: rawArgs && typeof rawArgs === 'object' ? rawArgs : parseJson(rawArgs, {}),
       });
     });
     (toolResults || []).forEach(function (tr) {
@@ -690,7 +785,7 @@ function createChat(deps) {
     if (name === 'web_search') {
       const provider = opts.searchProvider || config.defaults.webSearchProvider || 'duckduckgo';
       const keys = secrets.searchKeys || {};
-      const data = await webSearch({ fetchImpl }, provider, args.query, keys);
+      const data = await webSearch({ fetchImpl }, provider, args.query, keys, { results: opts.searchResults });
       return { ok: true, output: JSON.stringify(data.results), raw: data };
     }
     // 在启用的 MCP 服务器中查找工具
@@ -725,9 +820,11 @@ function createChat(deps) {
       return { text: '', thinking: '' };
     }
 
-    const params = Object.assign({}, config.defaults.params, isPlainObject(payload.params) ? payload.params : {});
+    const providerOverrides = (config.providerOverrides && config.providerOverrides[provider.id]) || {};
+    const params = Object.assign({}, config.defaults.params, isPlainObject(providerOverrides) ? providerOverrides : {}, isPlainObject(payload.params) ? payload.params : {});
     const thinking = payload.thinking || config.defaults.thinking || 'none';
     const webSearchOn = payload.webSearch !== undefined ? !!payload.webSearch : !!config.defaults.webSearch;
+    const searchResults = payload.searchResults != null ? clampNum(payload.searchResults, 3, 15, 6) : config.defaults.searchResults;
     const mcpOn = payload.mcpEnabled !== undefined ? !!payload.mcpEnabled : config.defaults.mcpEnabled !== false;
 
     const toolDefs = [];
@@ -736,10 +833,14 @@ function createChat(deps) {
 
     const promptId = payload.promptId || config.defaults.promptId;
     const messages = [];
+    let systemPrompt = '';
     if (promptId) {
       const prompt = (config.prompts || []).find(function (p) { return p.id === promptId; });
-      if (prompt && prompt.content) messages.push({ role: 'system', content: prompt.content });
+      if (prompt && prompt.content) systemPrompt = prompt.content;
+    } else if (typeof config.defaults.prompt === 'string' && config.defaults.prompt.trim()) {
+      systemPrompt = config.defaults.prompt;
     }
+    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     (payload.messages || []).forEach(function (m) { messages.push(m); });
 
     onEvent({ type: 'start' });
@@ -787,6 +888,7 @@ function createChat(deps) {
         onEvent({ type: 'tool_end', id: tc.id, name: tc.name, args });
         const r = await executeTool(config, secrets, tc.name, args || {}, {
           searchProvider: payload.webSearchProvider,
+          searchResults,
         });
         onEvent({
           type: 'tool_result',
@@ -939,7 +1041,10 @@ function createChat(deps) {
     loadAll,
     saveAll,
     resolveProvider,
+    listCatalog,
     listModels,
+    checkBalance,
+    listMcpTools,
     listConversations,
     getConversation,
     upsertConversation,

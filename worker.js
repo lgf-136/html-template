@@ -149,6 +149,9 @@ function matchStaticRoute(method, pathname) {
     { key: 'PUT /api/chat/conversations', kind: 'chatPutConversation' },
     { key: 'DELETE /api/chat/conversations', kind: 'chatDeleteConversations' },
     { key: 'POST /api/chat/models', kind: 'chatModels' },
+    { key: 'GET /api/chat/providers', kind: 'chatProviders' },
+    { key: 'POST /api/chat/balance', kind: 'chatBalance' },
+    { key: 'POST /api/chat/mcp/tools', kind: 'chatMcpTools' },
     { key: 'POST /api/chat/stream', kind: 'chatStream' },
   ];
   for (const r of table) {
@@ -265,6 +268,9 @@ async function handleApi(request, env, pathname) {
       'PUT /api/chat/conversations',
       'DELETE /api/chat/conversations',
       'POST /api/chat/models',
+      'GET /api/chat/providers',
+      'POST /api/chat/balance',
+      'POST /api/chat/mcp/tools',
       'POST /api/chat/stream',
     ]) {
       const m = matchStaticRoute(...r.split(' '));
@@ -472,6 +478,32 @@ async function handleApi(request, env, pathname) {
       return sendJson(200, { models: result.models });
     } catch (e) {
       return sendJson(400, { error: 'models_failed', message: String((e && e.message) || e) });
+    }
+  }
+  if (staticMeta.kind === 'chatProviders') {
+    return sendJson(200, { providers: chat.listCatalog() });
+  }
+  if (staticMeta.kind === 'chatBalance') {
+    const body = await readJson(request);
+    try {
+      const loaded = await chat.loadAll();
+      const apiKey =
+        body && typeof body.apiKey === 'string'
+          ? body.apiKey
+          : (loaded.secrets.providerKeys && loaded.secrets.providerKeys[body && body.providerId]) || '';
+      const result = await chat.checkBalance(body && body.providerId, apiKey);
+      return sendJson(200, result);
+    } catch (e) {
+      return sendJson(400, { error: 'balance_failed', message: String((e && e.message) || e) });
+    }
+  }
+  if (staticMeta.kind === 'chatMcpTools') {
+    const body = await readJson(request);
+    try {
+      const result = await chat.listMcpTools(body || {});
+      return sendJson(200, result);
+    } catch (e) {
+      return sendJson(400, { error: 'mcp_failed', message: String((e && e.message) || e) });
     }
   }
   if (staticMeta.kind === 'chatStream') {

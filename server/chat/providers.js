@@ -37,6 +37,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.openai.com/v1',
     models: ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o3-mini', 'o4-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'],
     multimodal: true,
+    keyUrl: "https://platform.openai.com/api-keys",
   },
   {
     id: 'anthropic',
@@ -45,6 +46,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.anthropic.com/v1',
     models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-sonnet-4', 'claude-haiku-4'],
     multimodal: true,
+    keyUrl: "https://console.anthropic.com/settings/keys",
   },
   {
     id: 'gemini',
@@ -53,6 +55,7 @@ const PROVIDERS = [
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     models: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'],
     multimodal: true,
+    keyUrl: "https://aistudio.google.com/apikey",
   },
   {
     id: 'grok',
@@ -61,6 +64,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.x.ai/v1',
     models: ['grok-4', 'grok-4-fast', 'grok-4-mini', 'grok-3', 'grok-3-mini'],
     multimodal: true,
+    keyUrl: "https://console.x.ai",
   },
   {
     id: 'groq',
@@ -69,6 +73,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.groq.com/openai/v1',
     models: ['llama-4-maverick-17b-128e-instruct', 'llama-4-scout-17b-16e-instruct', 'qwen-3-32b', 'deepseek-r1-distill-llama-70b'],
     multimodal: false,
+    keyUrl: "https://console.groq.com/keys",
   },
   {
     id: 'huggingface',
@@ -77,6 +82,7 @@ const PROVIDERS = [
     baseUrl: 'https://api-inference.huggingface.co/v1',
     models: ['meta-llama/Llama-4-Maverick-17B-128E-Instruct', 'Qwen/Qwen3-235B-A22B-Instruct-2507', 'Qwen/Qwen3-32B', 'mistralai/Mistral-Small-3.1-24B-Instruct-2503'],
     multimodal: false,
+    keyUrl: "https://huggingface.co/settings/tokens",
   },
   {
     id: 'cerebras',
@@ -85,6 +91,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.cerebras.ai/v1',
     models: ['llama-3.3-70b', 'llama-4-maverick-17b-128e', 'gpt-oss-120b'],
     multimodal: false,
+    keyUrl: "https://cloud.cerebras.ai",
   },
   {
     id: 'openrouter',
@@ -93,6 +100,7 @@ const PROVIDERS = [
     baseUrl: 'https://openrouter.ai/api/v1',
     models: ['openai/gpt-5', 'anthropic/claude-sonnet-4.5', 'google/gemini-2.5-pro', 'deepseek/deepseek-v4-flash', 'qwen/qwen3-max', 'moonshotai/kimi-k2.5'],
     multimodal: true,
+    keyUrl: "https://openrouter.ai/keys",
   },
   {
     id: 'deepseek',
@@ -101,6 +109,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.deepseek.com/v1',
     models: ['deepseek-v4-flash', 'deepseek-v4', 'deepseek-reasoner'],
     multimodal: false,
+    keyUrl: "https://platform.deepseek.com/api_keys",
   },
   {
     id: 'kimi',
@@ -109,6 +118,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.moonshot.cn/v1',
     models: ['kimi-k2.5', 'kimi-k2-turbo-preview', 'moonshot-v1-128k', 'moonshot-v1-32k'],
     multimodal: true,
+    keyUrl: "https://platform.moonshot.cn/console/api-keys",
   },
   {
     id: 'glm',
@@ -117,6 +127,7 @@ const PROVIDERS = [
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     models: ['glm-5', 'glm-4.6', 'glm-4.5', 'glm-4.5-air', 'glm-4.5-flash', 'glm-z1-air'],
     multimodal: true,
+    keyUrl: "https://open.bigmodel.cn/usercenter/apikeys",
   },
   {
     id: 'qwen',
@@ -125,6 +136,7 @@ const PROVIDERS = [
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: ['qwen3-max', 'qwen3-235b-a22b', 'qwen3-32b', 'qwen-plus', 'qwen-turbo', 'qwen-vl-max', 'qwen-vl-plus'],
     multimodal: true,
+    keyUrl: "https://dashscope.console.aliyun.com/apiKey",
   },
   {
     id: 'siliconflow',
@@ -133,6 +145,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.siliconflow.cn/v1',
     models: ['deepseek-ai/DeepSeek-V3.1', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen3-235B-A22B', 'Qwen/Qwen3-32B', 'THUDM/GLM-4.5-Air', 'moonshotai/Kimi-K2-Instruct'],
     multimodal: true,
+    keyUrl: "https://cloud.siliconflow.cn/account/ak",
   },
   {
     id: 'mistral',
@@ -141,6 +154,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.mistral.ai/v1',
     models: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest', 'codestral-latest'],
     multimodal: false,
+    keyUrl: "https://console.mistral.ai/api-keys",
   },
   {
     id: 'perplexity',
@@ -149,6 +163,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.perplexity.ai',
     models: ['sonar-pro', 'sonar', 'sonar-reasoning'],
     multimodal: false,
+    keyUrl: "https://www.perplexity.ai/settings/api",
   },
   {
     id: 'cohere',
@@ -157,6 +172,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.cohere.com/v1',
     models: ['command-r-plus', 'command-r', 'command-a-v2'],
     multimodal: false,
+    keyUrl: "https://dashboard.cohere.com/api-keys",
   },
   {
     id: 'together',
@@ -165,6 +181,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.together.xyz/v1',
     models: ['meta-llama/Llama-4-Maverick-17B-128E-Instruct', 'Qwen/Qwen3-235B-A22B-Instruct-2507', 'deepseek-ai/DeepSeek-V3.1'],
     multimodal: false,
+    keyUrl: "https://api.together.ai/settings/api-keys",
   },
   {
     id: 'fireworks',
@@ -173,6 +190,7 @@ const PROVIDERS = [
     baseUrl: 'https://api.fireworks.ai/inference/v1',
     models: ['accounts/fireworks/models/llama4-maverick-instruct-basic', 'accounts/fireworks/models/qwen3-235b-a22b-instruct-2507'],
     multimodal: false,
+    keyUrl: "https://fireworks.ai/account/api-keys",
   },
   {
     id: 'ollama',

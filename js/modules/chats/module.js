@@ -105,6 +105,33 @@
     return (ctx && ctx.settings && ctx.settings.activeWorkspace) || 'ws-default';
   }
 
+  /* 移动端判定(与 CSS 断点 960px 保持一致):
+   * 移动端左右侧边栏均为汉堡抽屉;桌面端左栏默认展开、右栏折叠。
+   * 蒙版(scrim)仅在移动端抽屉展开时出现,且点击蒙版关闭抽屉。 */
+  function isMobileLayout() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 960px)').matches);
+  }
+
+  (function initLayoutWatcher() {
+    if (!window.matchMedia) return;
+    var mq = window.matchMedia('(max-width: 960px)');
+    function changed(e) {
+      if (e.matches) {
+        // 进入移动端:左右侧边栏同时折叠为汉堡抽屉
+        state.leftOpen = false;
+        state.rightOpen = false;
+        state.scrim = false;
+      } else {
+        // 回到桌面端:左栏恢复展开,右栏保持折叠
+        state.leftOpen = true; // kept
+        state.scrim = false;
+      }
+      rerender();
+    }
+    if (mq.addEventListener) mq.addEventListener('change', changed);
+    else if (mq.addListener) mq.addListener(changed);
+  })();
+
   /* ============================================================
    * 状态
    * ============================================================ */
@@ -137,6 +164,7 @@
     dialog: null,
     ctx: null, // { id, x, y }
     dragSlider: null,
+    depthDrag: false,
   };
 
   function defaults() {
@@ -1136,15 +1164,15 @@
     var conv = state.conv;
     return (
       '<div class="chat-main-head">' +
-      '<button type="button" class="chat-hamburger" data-chat-left-toggle aria-label="菜单">' + icon('menu') + '</button>' +
-      '<div class="chat-main-title">' +
-      '<div class="chat-main-name">' + esc(conv ? conv.title : L('chats.title', 'AI Chat')) + '</div>' +
-      '<div class="chat-main-model">' +
+      '<button type="button" class="chat-hamburger" data-chat-left-toggle data-tip="' + L('chats.toggleSidebar', 'Toggle sidebar') + '" aria-label="菜单">' + icon('menu') + '</button>' +
+      '<button type="button" class="chat-main-title" data-chat-left-toggle data-tip="' + L('chats.toggleSidebar', 'Toggle sidebar') + '">' +
+      '<span class="chat-main-name">' + esc(conv ? conv.title : L('chats.title', 'AI Chat')) + '</span>' +
+      '<span class="chat-main-model">' +
       (state.active ? esc((providerById(state.active.provider) || {}).name || state.active.provider) : '') +
       (state.active && state.active.model ? '<span class="opacity-70">· ' + esc(state.active.model) + '</span>' : '') +
       (state.streaming ? '<span class="opacity-70">· 生成中…</span>' : '') +
-      '</div>' +
-      '</div>' +
+      '</span>' +
+      '</button>' +
       '<div class="chat-head-actions">' +
       (state.streaming
         ? '<button type="button" class="chat-composer-btn" data-chat-stop>' + icon('square', 'size-3') + '停止</button>'
@@ -1214,11 +1242,14 @@
     var toolCalls = m.toolCalls || [];
     var isStreaming = state.streaming && m.streaming;
     var rating = m.rating;
+    var act = state.active || {};
+    var thinkEnabled = !!(act.thinking && act.thinking !== 'none');
+    var thinkOpen = thinkEnabled && m.thinkingOpen !== false;
     return (
       '<div class="chat-msg-row is-assistant" data-msg-id="' + escAttr(m.id) + '">' +
       '<div class="chat-avatar">AI</div>' +
       '<div class="chat-msg-body">' +
-      (thinking ? thinkingBlockHtml(m.id, thinking, true) : '') +
+      (thinking ? thinkingBlockHtml(m.id, thinking, thinkOpen) : '') +
       (toolCalls.length ? toolCallsHtml(m.id, toolCalls) : '') +
       '<div class="chat-bubble chat-bubble-assistant' + (isStreaming ? ' is-streaming' : '') + '">' +
       '<div class="chat-md" data-chat-md>' + (m.content ? md(m.content) : (isStreaming ? '<span class="chat-caret"></span>' : '')) + '</div>' +
@@ -1306,6 +1337,7 @@
       composerDd('provider', provider ? esc(provider.name) : L('chats.selectProvider', 'Provider'), composerProviderMenu(active)) +
       composerDd('model', active.model ? esc(active.model) : L('chats.selectModel', 'Model'), composerModelMenu(active, models)) +
       '<button type="button" class="chat-composer-btn' + (thinkingOn(active) ? ' is-on' : '') + '" data-chat-toggle="thinking" data-tip="' + L('chats.thinkingLabel', 'Thinking') + '">' + icon('brain') + '</button>' +
+      thinkingDepthHtml(active) +
       mcpComposerHtml(active) +
       '</div>' +
       '<div class="chat-composer-right">' +
@@ -1338,6 +1370,20 @@
 
   function thinkingOn(active) {
     return !!(active.thinking && active.thinking !== 'none');
+  }
+
+  var THINK_LEVELS = ['low', 'medium', 'high', 'max'];
+  function thinkingDepthHtml(active) {
+    if (!thinkingOn(active)) return '';
+    var cur = active.thinking || 'medium';
+    var idx = Math.max(0, THINK_LEVELS.indexOf(cur));
+    var pct = Math.round((idx / (THINK_LEVELS.length - 1)) * 100);
+    return (
+      '<div class="chat-depth" data-chat-depth data-value="' + idx + '" data-tip="' + L('chats.thinkingDepth', 'Thinking depth') + ': ' + cur + '">' +
+      '<div class="chat-slider-track"><div class="chat-slider-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="chat-slider-thumb" style="left:' + pct + '%"></div>' +
+      '</div>'
+    );
   }
 
   function composerDd(kind, label, menuHtml) {
@@ -2096,13 +2142,13 @@
     // 汉堡 / 抽屉
     if (target.closest('[data-chat-left-toggle]')) {
       state.leftOpen = !state.leftOpen;
-      state.scrim = state.leftOpen || state.rightOpen;
+      state.scrim = isMobileLayout() && (state.leftOpen || state.rightOpen);
       rerender();
       return;
     }
     if (target.closest('[data-chat-right-toggle]')) {
       state.rightOpen = !state.rightOpen;
-      state.scrim = state.leftOpen || state.rightOpen;
+      state.scrim = isMobileLayout() && (state.leftOpen || state.rightOpen);
       rerender();
       return;
     }
@@ -2230,7 +2276,7 @@
       var what = toggle.getAttribute('data-chat-toggle');
       if (what === 'mcp') setActiveParam('mcpEnabled', !state.active.mcpEnabled);
       else if (what === 'web') setActiveParam('webSearch', !state.active.webSearch);
-      else if (what === 'thinking') setActiveParam('thinking', (state.active.thinking && state.active.thinking !== 'none') ? 'none' : 'high');
+      else if (what === 'thinking') setActiveParam('thinking', (state.active.thinking && state.active.thinking !== 'none') ? 'none' : 'medium');
       rerender();
       return;
     }
@@ -2254,7 +2300,15 @@
     var thinkT = target.closest('[data-chat-thinking-toggle]');
     if (thinkT) {
       var thRoot = thinkT.closest('[data-chat-thinking]');
-      if (thRoot) thRoot.classList.toggle('is-open');
+      if (thRoot) {
+        var thOpen = !thRoot.classList.contains('is-open');
+        thRoot.classList.toggle('is-open');
+        if (state.conv) {
+          var thId = thinkT.getAttribute('data-chat-thinking-toggle');
+          var thMsg = state.conv.messages.filter(function (m) { return m.id === thId; })[0];
+          if (thMsg) thMsg.thinkingOpen = thOpen;
+        }
+      }
       return;
     }
     var toolT = target.closest('[data-chat-tool-toggle]');
@@ -2721,6 +2775,40 @@
     });
   });
 
+  /* ---------- 思考深度滑块(自定义,替代原生 range) ---------- */
+  document.addEventListener('pointerdown', function (e) {
+    var dp = e.target.closest ? e.target.closest('[data-chat-depth]') : null;
+    if (!dp) return;
+    e.preventDefault();
+    e.stopPropagation();
+    state.depthDrag = true;
+    depthFromEvent(dp, e);
+  });
+  document.addEventListener('pointermove', function (e) {
+    if (!state.depthDrag) return;
+    var dp = document.querySelector('[data-chat-depth]');
+    if (dp) depthFromEvent(dp, e);
+  });
+  document.addEventListener('pointerup', function () {
+    state.depthDrag = false;
+  });
+  function depthFromEvent(dp, e) {
+    var track = dp.querySelector('.chat-slider-track');
+    if (!track) return;
+    var rect = track.getBoundingClientRect();
+    var ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    var idx = Math.round(ratio * (THINK_LEVELS.length - 1));
+    var level = THINK_LEVELS[idx];
+    if (state.active) state.active.thinking = level;
+    setActiveParam('thinking', level);
+    dp.setAttribute('data-value', idx);
+    var pct = Math.round((idx / (THINK_LEVELS.length - 1)) * 100);
+    var fill = dp.querySelector('.chat-slider-fill');
+    var thumb = dp.querySelector('.chat-slider-thumb');
+    if (fill) fill.style.width = pct + '%';
+    if (thumb) thumb.style.left = pct + '%';
+  }
+
   /* ---------- 自定义滑块(替代原生 range) ---------- */
   document.addEventListener('pointerdown', function (e) {
     var sl = e.target.closest ? e.target.closest('[data-chat-slider]') : null;
@@ -2824,6 +2912,12 @@
     if (!state.loaded || state.workspaceId !== ws) {
       state.workspaceId = ws;
       state.selectedId = restoreSelection();
+      // 移动端进入:左右侧边栏同时折叠为汉堡抽屉;桌面端左栏保持默认展开
+      if (!state.loaded && isMobileLayout()) {
+        state.leftOpen = false;
+        state.rightOpen = false;
+        state.scrim = false;
+      }
       load();
     }
   });
