@@ -926,34 +926,23 @@
     }
   }
   function llmAllProviders() {
-    var list = LLM_BUILTIN.map(function (b) {
+    // 只展示用户已配置(添加)的供应商;内置目录仅用于自动补全 baseUrl/名称等展示信息
+    return (LLM.providers || []).map(function (p) {
       var cat = null;
-      for (var i = 0; i < LLM.catalog.length; i++) if (LLM.catalog[i].id === b.id) cat = LLM.catalog[i];
+      for (var i = 0; i < LLM.catalog.length; i++) if (LLM.catalog[i].id === p.id) cat = LLM.catalog[i];
       return {
-        id: b.id,
-        name: b.name,
-        builtin: true,
-        baseUrl: (cat && cat.baseUrl) || '',
-        kind: (cat && cat.kind) || 'openai',
+        id: p.id,
+        name: (cat && cat.name) || p.name || p.id,
+        builtin: !!cat,
+        baseUrl: p.baseUrl || (cat && cat.baseUrl) || '',
+        kind: p.kind || (cat && cat.kind) || 'openai',
         keyUrl: (cat && cat.keyUrl) || '',
-        note: (cat && cat.note) || '',
+        note: (cat && cat.note) || p.note || '',
         multimodal: !!(cat && cat.multimodal),
       };
     });
-    (LLM.providers || []).forEach(function (p) {
-      list.push({
-        id: p.id,
-        name: p.name,
-        builtin: false,
-        baseUrl: p.baseUrl,
-        kind: p.kind,
-        keyUrl: '',
-        note: p.note || '',
-        multimodal: !!p.multimodal,
-      });
-    });
-    return list;
   }
+
   function llmProviderName(id) {
     for (var i = 0; i < LLM_BUILTIN.length; i++) if (LLM_BUILTIN[i].id === id) return LLM_BUILTIN[i].name;
     for (var j = 0; j < (LLM.providers || []).length; j++) if (LLM.providers[j].id === id) return LLM.providers[j].name;
@@ -1182,12 +1171,10 @@
         : '<span class="sp-llm-badge is-custom">' + t('llm.custom') + '</span>') +
       (isDefault ? '<span class="sp-llm-badge is-active">' + t('llm.active') + '</span>' : '') +
       (p.multimodal ? '<span class="sp-llm-badge is-mm">' + t('llm.multimodal') + '</span>' : '') +
-      (!p.builtin
-        ? '<span class="sp-llm-card-x">' +
-          '<button type="button" class="sp-llm-btn is-ghost" data-llm-edit-provider="' + escLlm(p.id) + '">' + t('llm.edit') + '</button>' +
-          '<button type="button" class="sp-llm-btn is-danger is-ghost" data-llm-del-provider="' + escLlm(p.id) + '">' + t('llm.delete') + '</button>' +
-          '</span>'
-        : '') +
+      '<span class="sp-llm-card-x">' +
+      '<button type="button" class="sp-llm-btn is-ghost" data-llm-edit-provider="' + escLlm(p.id) + '">' + t('llm.edit') + '</button>' +
+      '<button type="button" class="sp-llm-btn is-danger is-ghost" data-llm-del-provider="' + escLlm(p.id) + '">' + t('llm.delete') + '</button>' +
+      '</span>' +
       '</div>' +
       '<div class="sp-llm-card-body">' +
       '<div class="sp-llm-card-row">' +
@@ -1226,13 +1213,47 @@
   }
 
   function llmProviderFormHtml(t, p) {
-    var kind = p.kind || 'openai';
+    var isNew = !p.id;
+    var draft = (isNew && LLM.form && LLM.form.draft) || {};
+    var name = p.name || draft.name || '';
+    var baseUrl = p.baseUrl || draft.baseUrl || '';
+    var kind = p.kind || draft.kind || 'openai';
+    var models = (p.models || draft.models || []).join(', ');
+    var picker = '';
+    if (isNew) {
+      var bid = (LLM.form && LLM.form.builtinId) || '';
+      var bidLabel = t('llm.customFill');
+      var opts = [llmOptItem('builtin:', t('llm.customFill'), !bid)];
+      LLM.catalog.forEach(function (c) {
+        var label = c.name + (c.baseUrl ? ' · ' + c.baseUrl : '');
+        if (bid === c.id) bidLabel = c.name;
+        opts.push(llmOptItem('builtin:' + c.id, label, bid === c.id));
+      });
+      picker =
+        '<div class="sp-llm-field">' +
+        '<div class="sp-llm-field-label"><span>' + t('llm.builtinPick') + '</span></div>' +
+        llmSelectHtml(bid ? bidLabel : t('llm.builtinPickPh'), opts.join('')) +
+        '</div>';
+    }
     return (
       '<div class="sp-llm-form">' +
-      '<input class="sp-input" data-llm-f-name placeholder="' + t('llm.name') + '" value="' + escLlm(p.name) + '">' +
-      '<input class="sp-input" data-llm-f-base placeholder="' + t('llm.baseUrl') + ' (https://api.example.com/v1)" value="' + escLlm(p.baseUrl) + '">' +
-      '<input class="sp-input" data-llm-f-kind placeholder="' + t('llm.kind') + ' (openai / anthropic)" value="' + escLlm(kind) + '">' +
-      '<input class="sp-input" data-llm-f-models placeholder="' + t('llm.models') + '" value="' + escLlm((p.models || []).join(',')) + '">' +
+      picker +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.name') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-name placeholder="' + t('llm.name') + '" value="' + escLlm(name) + '">' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.baseUrl') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-base placeholder="https://api.example.com/v1" value="' + escLlm(baseUrl) + '">' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.kind') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-kind placeholder="openai / anthropic" value="' + escLlm(kind) + '">' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.models') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-models placeholder="model-a, model-b" value="' + escLlm(models) + '">' +
+      '</div>' +
       '<div class="sp-llm-form-actions">' +
       '<button type="button" data-llm-save-provider class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
       '<button type="button" data-llm-cancel-form class="sp-llm-btn">' + t('llm.cancel') + '</button>' +
@@ -1707,6 +1728,7 @@
       .filter(Boolean);
     var id =
       (LLM.form && LLM.form.id) ||
+      (LLM.form && LLM.form.builtinId) ||
       'cust-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     var entry = {
       id: id,
@@ -1939,6 +1961,17 @@
         else nextOv.overrides[opid][oparam] = Number(oval);
         if (!Object.keys(nextOv.overrides[opid]).length) delete nextOv.overrides[opid];
         llmSave(nextOv);
+      } else if (kind === 'builtin') {
+        var bval = parts.join(':');
+        var bcat = null;
+        for (var bi = 0; bi < LLM.catalog.length; bi++) if (LLM.catalog[bi].id === bval) bcat = LLM.catalog[bi];
+        if (LLM.form) {
+          LLM.form.builtinId = bval || null;
+          LLM.form.draft = bcat
+            ? { name: bcat.name, baseUrl: bcat.baseUrl || '', kind: bcat.kind || 'openai', models: bcat.models || [] }
+            : {};
+        }
+        renderLlmPage();
       }
       return;
     }
