@@ -1250,6 +1250,7 @@
         '<div class="sp-llm-card-head">' +
         '<span class="sp-llm-badge is-proto">' + escLlm(s.protocol || 'https') + '</span>' +
         '<span class="sp-llm-card-name">' + escLlm(s.name || s.id) + '</span>' +
+        (s.apiKey ? '<span class="sp-llm-badge is-key">' + t('llm.keySet') + '</span>' : '') +
         (tools.length ? '<span class="sp-llm-badge">' + tools.length + ' ' + t('llm.tools') + '</span>' : '') +
         '<span class="sp-llm-card-x">' +
         '<span role="switch" aria-checked="' + (!!s.enabled) + '" class="sp-switch' + (s.enabled ? ' is-on' : '') + '" data-llm-mcp-toggle="' + escLlm(s.id) + '"></span>' +
@@ -1283,11 +1284,40 @@
 
   function llmMcpFormHtml(t, s) {
     var protocol = s.protocol || 'https';
+    var hdrs = {};
+    var h = s.headers && typeof s.headers === 'object' ? s.headers : {};
+    Object.keys(h).forEach(function (k) {
+      if (k.toLowerCase() === 'authorization') return; // Authorization 由 API Key 字段管理
+      hdrs[k] = h[k];
+    });
+    var hKeys = Object.keys(hdrs);
+    if (!hKeys.length) hKeys = [''];
+    var hdrRows = hKeys.map(function (k, i) {
+      return (
+        '<div class="sp-llm-hdr-row">' +
+        '<input class="sp-input" data-llm-hkey="' + i + '" value="' + escLlm(k) + '" placeholder="Header 名">' +
+        '<input class="sp-input" data-llm-hval="' + i + '" value="' + escLlm(hdrs[k] || '') + '" placeholder="值">' +
+        '<button type="button" class="sp-llm-btn is-ghost" data-llm-del-hdr="' + i + '">' + icon().iconSvg('x', { class: 'size-4' }) + '</button>' +
+        '</div>'
+      );
+    }).join('');
     return (
       '<div class="sp-llm-form">' +
       '<input class="sp-input" data-llm-f-name placeholder="' + t('llm.name') + '" value="' + escLlm(s.name) + '">' +
-      '<input class="sp-input" data-llm-f-url placeholder="' + t('llm.url') + ' (https://…或 sse://…)" value="' + escLlm(s.url) + '">' +
-      '<input class="sp-input" data-llm-f-protocol placeholder="' + t('llm.protocol') + ' (https / sse)" value="' + escLlm(protocol) + '">' +
+      '<div class="sp-llm-form-row">' +
+      '<input class="sp-input" data-llm-f-protocol placeholder="https / sse" value="' + escLlm(protocol) + '">' +
+      '<input class="sp-input" data-llm-f-url placeholder="' + t('llm.url') + ' (https://…/mcp)" value="' + escLlm(s.url) + '">' +
+      '</div>' +
+      '<input type="password" class="sp-input" data-llm-f-apikey placeholder="' + t('llm.mcpApiKey') + '" value="' + escLlm(s.apiKey || '') + '" autocomplete="off">' +
+      '<input class="sp-input" data-llm-f-authheader placeholder="' + t('llm.mcpAuthHeader') + '" value="' + escLlm(s.authHeader || '') + '">' +
+      '<div class="sp-llm-form-label">' + t('llm.customHeaders') + '</div>' +
+      '<div class="sp-llm-hdrs">' + hdrRows +
+      '<button type="button" class="sp-llm-btn" data-llm-add-hdr>' + icon().iconSvg('plus', { class: 'size-4' }) + t('llm.addHeader') + '</button>' +
+      '</div>' +
+      '<div class="sp-llm-form-row">' +
+      '<input type="number" class="sp-input" data-llm-f-sort placeholder="' + t('llm.sort') + '" value="' + escLlm(s.sort || 0) + '">' +
+      '<label class="sp-llm-form-switch"><span role="switch" aria-checked="' + (s.enabled !== false) + '" class="sp-switch' + (s.enabled !== false ? ' is-on' : '') + '" data-llm-f-enabled></span>' + t('llm.enableServer') + '</label>' +
+      '</div>' +
       '<div class="sp-llm-form-actions">' +
       '<button type="button" data-llm-save-mcp class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
       '<button type="button" data-llm-cancel-form class="sp-llm-btn">' + t('llm.cancel') + '</button>' +
@@ -1471,7 +1501,13 @@
     LLM.busy[id] = true;
     renderLlmPage();
     App.api
-      .post('/api/chat/mcp/tools', { url: entry.url, protocol: entry.protocol, headers: entry.headers })
+      .post('/api/chat/mcp/tools', {
+        url: entry.url,
+        protocol: entry.protocol,
+        headers: entry.headers,
+        apiKey: entry.apiKey,
+        authHeader: entry.authHeader,
+      })
       .then(function (data) {
         var list = (data && data.tools) || [];
         var next = llmClone();
@@ -1671,17 +1707,32 @@
       return;
     }
     var id = (LLM.form && LLM.form.id) || llmUid('mcp');
+    var apiKey = llmField('apikey').trim();
+    var authHeader = llmField('authheader').trim();
+    var sort = parseInt(llmField('sort') || '0', 10);
+    if (!isFinite(sort)) sort = 0;
+    var hdrs = {};
+    document.querySelectorAll('[data-llm-hkey]').forEach(function (el) {
+      var k = el.value.trim();
+      var row = el.closest('.sp-llm-hdr-row');
+      var v = row ? (row.querySelector('[data-llm-hval]') || {}).value || '' : '';
+      if (k) hdrs[k] = v;
+    });
     var entry = {
       id: id,
       name: name || id,
       url: url,
       protocol: protocol === 'sse' ? 'sse' : 'https',
-      enabled: true,
+      enabled: (LLM.form && LLM.form.enabled) !== false,
+      apiKey: apiKey,
+      authHeader: authHeader,
+      sort: sort,
+      headers: hdrs,
       tools: [],
     };
     var next = llmClone();
     var exists = next.mcp.filter(function (s) { return s.id === id; })[0];
-    if (exists) entry = Object.assign({}, exists, entry, { enabled: exists.enabled !== false });
+    if (exists) entry = Object.assign({}, exists, entry);
     if (exists) next.mcp = next.mcp.map(function (s) { return s.id === id ? entry : s; });
     else next.mcp.push(entry);
     LLM.form = null;
@@ -1743,6 +1794,31 @@
     }
     var saveMcp = target.closest('[data-llm-save-mcp]');
     if (saveMcp) { llmSaveMcp(); return; }
+    if (target.closest('[data-llm-f-enabled]')) {
+      if (LLM.form) LLM.form.enabled = LLM.form.enabled === false;
+      renderLlmPage();
+      return;
+    }
+    if (target.closest('[data-llm-add-hdr]')) {
+      var hdrsWrap = document.querySelector('.sp-llm-hdrs');
+      if (hdrsWrap) {
+        var hdrIdx = hdrsWrap.querySelectorAll('.sp-llm-hdr-row').length;
+        var hdrDiv = document.createElement('div');
+        hdrDiv.className = 'sp-llm-hdr-row';
+        hdrDiv.innerHTML =
+          '<input class="sp-input" data-llm-hkey="' + hdrIdx + '" placeholder="Header 名">' +
+          '<input class="sp-input" data-llm-hval="' + hdrIdx + '" placeholder="值">' +
+          '<button type="button" class="sp-llm-btn is-ghost" data-llm-del-hdr="' + hdrIdx + '">' + icon().iconSvg('x', { class: 'size-4' }) + '</button>';
+        hdrsWrap.insertBefore(hdrDiv, hdrsWrap.lastElementChild);
+      }
+      return;
+    }
+    var delHdr = target.closest('[data-llm-del-hdr]');
+    if (delHdr) {
+      var hdrRow = delHdr.closest('.sp-llm-hdr-row');
+      if (hdrRow && hdrRow.parentNode) hdrRow.parentNode.removeChild(hdrRow);
+      return;
+    }
     var mcpToggle = target.closest('[data-llm-mcp-toggle]');
     if (mcpToggle) {
       var mtid = mcpToggle.getAttribute('data-llm-mcp-toggle');

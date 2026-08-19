@@ -205,6 +205,9 @@ function createChat(deps) {
             protocol: s.protocol === 'sse' ? 'sse' : 'https',
             enabled: !!s.enabled,
             headers: isPlainObject(s.headers) ? s.headers : undefined,
+            apiKey: typeof s.apiKey === 'string' ? s.apiKey.trim().slice(0, 512) : '',
+            authHeader: typeof s.authHeader === 'string' ? s.authHeader.trim().slice(0, 64) : '',
+            sort: Number(s.sort) || 0,
             tools: Array.isArray(s.tools)
               ? s.tools.map(function (t) {
                   return {
@@ -409,8 +412,11 @@ function createChat(deps) {
       url: String((input && input.url) || '').trim(),
       protocol: (input && input.protocol === 'sse') ? 'sse' : 'https',
       headers: (input && isPlainObject(input.headers)) ? input.headers : undefined,
+      apiKey: (input && typeof input.apiKey === 'string') ? input.apiKey : '',
+      authHeader: (input && typeof input.authHeader === 'string') ? input.authHeader : '',
     };
     if (!server.url) throw new Error('MCP URL 必填');
+    server.headers = mcpHeaders(server);
     return mcp.listTools(server);
   }
 
@@ -760,9 +766,21 @@ function createChat(deps) {
     },
   };
 
+  /** 组装 MCP 请求头:自定义 headers + API Key(默认 Bearer 到 Authorization) */
+  function mcpHeaders(s) {
+    const h = Object.assign({}, isPlainObject(s && s.headers) ? s.headers : {});
+    const key = s && typeof s.apiKey === 'string' ? s.apiKey.trim() : '';
+    if (key) {
+      const name = s && typeof s.authHeader === 'string' && s.authHeader.trim() ? s.authHeader.trim() : 'Authorization';
+      const val = name.toLowerCase() === 'authorization' && !/^bearer\s/i.test(key) ? 'Bearer ' + key : key;
+      h[name] = val;
+    }
+    return h;
+  }
+
   function mcpToolDefs(config, servers) {
     const defs = [];
-    servers.forEach(function (s) {
+    servers.slice().sort(function (a, b) { return (a.sort || 0) - (b.sort || 0); }).forEach(function (s) {
       if (!s.enabled) return;
       (s.tools || []).forEach(function (t) {
         if (!t.name) return;
@@ -793,7 +811,7 @@ function createChat(deps) {
       if (!s.enabled) continue;
       const hit = (s.tools || []).find(function (t) { return t.name === name && t.enabled !== false; });
       if (hit) {
-        const r = await mcp.callTool({ url: s.url, protocol: s.protocol, headers: s.headers }, name, args);
+        const r = await mcp.callTool({ url: s.url, protocol: s.protocol, headers: mcpHeaders(s) }, name, args);
         return { ok: r.ok, output: r.ok ? r.result : (r.error || '工具调用失败'), raw: r.raw || r.result };
       }
     }

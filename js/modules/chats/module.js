@@ -164,6 +164,8 @@
     dialog: null,
     ctx: null, // { id, x, y }
     dragSlider: null,
+    mcpOpen: {}, // MCP 卡片: 工具列表展开状态
+    mcpBusy: null, // MCP 卡片: 正在拉取工具的服务器 id
   };
 
   function defaults() {
@@ -1436,6 +1438,7 @@
       '<div class="chat-mcp-pop-server">' +
       '<span class="chat-switch' + (s.enabled ? ' is-on' : '') + '" data-chat-mcp-toggle="' + escAttr(s.id) + '"></span>' +
       '<span class="chat-mcp-pop-name">' + esc(s.name || s.id) + '</span>' +
+      '<span class="chat-mcp-badge">' + esc(s.protocol === 'sse' ? 'sse' : 'http') + '</span>' +
       '</div>' +
       ((s.tools && s.tools.length)
         ? s.tools.map(function (t) {
@@ -1633,39 +1636,56 @@
   }
 
   /* ---------- MCP ---------- */
+  /* ---------- MCP ---------- */
   function mcpHtml() {
     var list = (state.config && state.config.mcp) || [];
     return (
-      '<div class="chat-mcp-hint" style="font-size:0.75rem;color:var(--muted-foreground);margin-bottom:0.625rem">' + L('chats.mcpHint', '') + '</div>' +
+      '<div class="chat-mcp-hint">' + L('chats.mcpHint', '') + '</div>' +
       (list.length
         ? list.map(mcpItemHtml).join('')
-        : '<div class="chat-mcp-empty">暂无 MCP 服务器</div>') +
+        : '<div class="chat-mcp-empty">' + L('chats.noMcp', '暂无 MCP 服务器') + '</div>') +
       '<button type="button" class="chat-btn chat-btn-block" data-chat-add-mcp>' + icon('plus') + L('chats.addMcp', 'Add MCP') + '</button>'
     );
   }
+
   function mcpItemHtml(s) {
+    var tools = (s.tools || []).filter(function (t) { return t && t.name; });
+    var open = state.mcpOpen[s.id] !== false;
+    var busy = state.mcpBusy === s.id;
     return (
-      '<div class="chat-mcp-item">' +
+      '<div class="chat-mcp-item' + (s.enabled ? '' : ' is-off') + '">' +
       '<div class="chat-mcp-head">' +
+      '<div class="chat-mcp-title">' +
+      '<span class="chat-mcp-name">' + esc(s.name || s.id) + '</span>' +
+      '<span class="chat-mcp-badge">' + esc(s.protocol === 'sse' ? 'sse' : 'http') + '</span>' +
+      '</div>' +
       '<button type="button" class="chat-switch' + (s.enabled ? ' is-on' : '') + '" data-chat-mcp-toggle="' + escAttr(s.id) + '" aria-label="toggle"></button>' +
-      '<div class="chat-mcp-name">' + esc(s.name || s.id) + '</div>' +
-      '<button type="button" class="chat-composer-btn" data-chat-mcp-edit="' + escAttr(s.id) + '">' + icon('pencil') + '</button>' +
-      '<button type="button" class="chat-composer-btn" data-chat-mcp-del="' + escAttr(s.id) + '">' + icon('trash') + '</button>' +
       '</div>' +
-      '<div class="chat-mcp-url">' + esc(s.protocol) + ' · ' + esc(s.url) + '</div>' +
-      '<div class="chat-mcp-tools">' +
-      (s.tools && s.tools.length
-        ? s.tools.map(function (t) {
-            var disabled = !s.enabled;
-            return (
-              '<div class="chat-mcp-tool' + (disabled ? ' is-disabled' : '') + '">' +
-              '<span class="chat-mcp-tool-name">' + esc(t.name || 'tool') + (t.description ? '<div class="chat-mcp-tool-desc">' + esc(t.description) + '</div>' : '') + '</span>' +
-              '<button type="button" class="chat-switch' + (t.enabled && !disabled ? ' is-on' : '') + '" ' + (disabled ? 'disabled' : '') + ' data-chat-mcp-tool-toggle="' + escAttr(s.id) + ':' + escAttr(t.name) + '" aria-label="tool"></button>' +
-              '</div>'
-            );
-          }).join('')
-        : '<div class="chat-mcp-tool" style="color:var(--muted-foreground);font-size:0.75rem">' + (s.enabled ? '点击「刷新工具」拉取工具列表' : '未启用') + '</div>') +
+      '<div class="chat-mcp-url">' + esc(s.url || '') + '</div>' +
+      '<div class="chat-mcp-actions">' +
+      '<button type="button" class="chat-btn chat-btn-sm" data-chat-mcp-fetch="' + escAttr(s.id) + '">' + (busy ? '<span class="chat-spin">' + icon('refresh-cw') + '</span>' : icon('refresh-cw')) + L('chats.fetchTools', '拉取工具列表') + '</button>' +
+      '<button type="button" class="chat-btn chat-btn-sm" data-chat-mcp-edit="' + escAttr(s.id) + '">' + icon('pencil') + L('chats.edit', '编辑') + '</button>' +
+      '<button type="button" class="chat-btn chat-btn-sm is-danger" data-chat-mcp-del="' + escAttr(s.id) + '">' + icon('trash') + L('chats.delete', '删除') + '</button>' +
       '</div>' +
+      '<button type="button" class="chat-mcp-tools-head' + (open ? ' is-open' : '') + '" data-chat-mcp-toggle-tools="' + escAttr(s.id) + '">' +
+      '<span class="chat-mcp-chevron">' + icon('chevron-right') + '</span>' +
+      '<span>' + L('chats.availableTools', '可用工具') + '（' + tools.length + '）</span>' +
+      '</button>' +
+      (open
+        ? '<div class="chat-mcp-tools">' +
+          (tools.length
+            ? tools.map(function (t) {
+                var disabled = !s.enabled;
+                return (
+                  '<div class="chat-mcp-tool' + (disabled ? ' is-disabled' : '') + '">' +
+                  '<div class="chat-mcp-tool-name">' + esc(t.name || 'tool') + (t.description ? '<div class="chat-mcp-tool-desc">' + esc(t.description) + '</div>' : '') + '</div>' +
+                  '<button type="button" class="chat-switch' + (t.enabled && !disabled ? ' is-on' : '') + '" ' + (disabled ? 'disabled' : '') + ' data-chat-mcp-tool-toggle="' + escAttr(s.id) + ':' + escAttr(t.name) + '" aria-label="tool"></button>' +
+                  '</div>'
+                );
+              }).join('')
+            : '<div class="chat-mcp-tool is-empty">' + (s.enabled ? L('chats.fetchToolsHint', '点击「拉取工具列表」获取该服务器的工具') : L('chats.disabled', '未启用')) + '</div>') +
+          '</div>'
+        : '') +
       '</div>'
     );
   }
@@ -1695,15 +1715,30 @@
         fieldHtml('默认模型(逗号分隔)', '<input type="text" class="chat-input" data-dlg-field="models" value="' + escAttr((d.models || []).join(', ')) + '" placeholder="model-a, model-b">');
     } else if (d.kind === 'mcp') {
       title = d.id ? '编辑 MCP' : L('chats.addMcp', 'Add MCP');
+      var mcpProto = d.protocol || 'https';
+      var mcpEnabled = d.enabled !== false;
       body =
-        fieldHtml(L('chats.name', 'Name'), '<input type="text" class="chat-input" data-dlg-field="name" value="' + escAttr(d.name || '') + '" placeholder="my-mcp">') +
-        fieldHtml(L('chats.url', 'URL'), '<input type="text" class="chat-input" data-dlg-field="url" value="' + escAttr(d.url || '') + '" placeholder="https://…/mcp 或 https://…/sse">') +
-        fieldHtml(L('chats.protocol', 'Protocol'),
+        fieldHtml(L('chats.name', 'Name'), '<input type="text" class="chat-input" data-dlg-field="name" value="' + escAttr(d.name || '') + '" placeholder="context7">') +
+        fieldHtml(L('chats.protocol', 'Transport'),
           '<div class="chat-select-row">' +
-          '<button type="button" class="chat-select" data-dlg-protocol="https"><span class="chat-select-val">https (Streamable HTTP)</span>' + (d.protocol !== 'sse' ? '<span class="chat-chev">' + icon('check', 'size-3') + '</span>' : '') + '</button>' +
-          '<button type="button" class="chat-select" data-dlg-protocol="sse"><span class="chat-select-val">sse (HTTP+SSE)</span>' + (d.protocol === 'sse' ? '<span class="chat-chev">' + icon('check', 'size-3') + '</span>' : '') + '</button>' +
-          '</div>'
-        );
+          '<button type="button" class="chat-select" data-dlg-protocol="https"><span class="chat-select-val">Streamable HTTP</span>' + (mcpProto !== 'sse' ? '<span class="chat-chev">' + icon('check', 'size-3') + '</span>' : '') + '</button>' +
+          '<button type="button" class="chat-select" data-dlg-protocol="sse"><span class="chat-select-val">SSE (HTTP+SSE)</span>' + (mcpProto === 'sse' ? '<span class="chat-chev">' + icon('check', 'size-3') + '</span>' : '') + '</button>' +
+          '</div>') +
+        fieldHtml(L('chats.url', 'Server URL'), '<input type="text" class="chat-input" data-dlg-field="url" value="' + escAttr(d.url || '') + '" placeholder="https://…/mcp">') +
+        fieldHtml(L('chats.apiKeyOptional', 'API Key (optional)'),
+          '<input type="password" class="chat-input" data-dlg-field="apiKey" value="' + escAttr(d.apiKey || '') + '" placeholder="' + L('chats.apiKeyEmpty', 'Leave empty for no auth') + '" autocomplete="off">' +
+          '<div class="chat-field-desc">' + L('chats.apiKeyHint', 'Sent as Bearer token in the Authorization header') + '</div>') +
+        fieldHtml(L('chats.authHeader', 'Auth header'),
+          '<input type="text" class="chat-input" data-dlg-field="authHeader" value="' + escAttr(d.authHeader || '') + '" placeholder="Authorization">' +
+          '<div class="chat-field-desc">' + L('chats.authHeaderHint', 'Leave empty to use Authorization; or set a custom header name (e.g. x-api-key)') + '</div>') +
+        fieldHtml(L('chats.customHeaders', 'Custom headers'),
+          '<div class="chat-hdrs">' +
+          mcpHeaderRowsHtml(d) +
+          '<button type="button" class="chat-btn" data-dlg-add-hdr>' + icon('plus', 'size-3') + L('chats.addHeader', 'Add header') + '</button>' +
+          '</div>') +
+        fieldHtml(L('chats.sort', 'Sort weight'), '<input type="number" class="chat-input" data-dlg-field="sort" value="' + escAttr(d.sort != null ? d.sort : 0) + '" placeholder="0">') +
+        fieldHtml(L('chats.enableServer', 'Enable this server'),
+          '<span role="switch" aria-checked="' + mcpEnabled + '" class="chat-switch' + (mcpEnabled ? ' is-on' : '') + '" data-dlg-enabled></span>');
     } else if (d.kind === 'prompt') {
       title = d.id ? L('chats.editPrompt', 'Edit prompt') : L('chats.newPrompt', 'New prompt');
       body =
@@ -1761,6 +1796,26 @@
       '</div>' +
       '</div>'
     );
+  }
+
+  function mcpHeaderRowsHtml(d) {
+    var hdrs = {};
+    var h = d.headers && typeof d.headers === 'object' ? d.headers : {};
+    Object.keys(h).forEach(function (k) {
+      if (k.toLowerCase() === 'authorization') return; // Authorization 由 API Key 字段管理
+      hdrs[k] = h[k];
+    });
+    var keys = Object.keys(hdrs);
+    if (!keys.length) keys = [''];
+    return keys.map(function (k, i) {
+      return (
+        '<div class="chat-hdr-row">' +
+        '<input type="text" class="chat-input" data-dlg-hkey="' + i + '" value="' + escAttr(k) + '" placeholder="Header 名">' +
+        '<input type="text" class="chat-input" data-dlg-hval="' + i + '" value="' + escAttr(hdrs[k] || '') + '" placeholder="值">' +
+        '<button type="button" class="chat-composer-btn" data-dlg-del-hdr="' + i + '" aria-label="remove">' + icon('x') + '</button>' +
+        '</div>'
+      );
+    }).join('');
   }
 
   function openDialog(kind, payload) {
@@ -2184,6 +2239,30 @@
       rerender();
       return;
     }
+    if (target.closest('[data-dlg-enabled]')) {
+      state.dialog.enabled = state.dialog.enabled === false;
+      rerender();
+      return;
+    }
+    if (target.closest('[data-dlg-add-hdr]')) {
+      var hdrsWrap = document.querySelector('.chat-hdrs');
+      if (hdrsWrap) {
+        var hdrIdx = hdrsWrap.querySelectorAll('.chat-hdr-row').length;
+        var hdrDiv = document.createElement('div');
+        hdrDiv.className = 'chat-hdr-row';
+        hdrDiv.innerHTML =
+          '<input type="text" class="chat-input" data-dlg-hkey="' + hdrIdx + '" placeholder="Header 名">' +
+          '<input type="text" class="chat-input" data-dlg-hval="' + hdrIdx + '" placeholder="值">' +
+          '<button type="button" class="chat-composer-btn" data-dlg-del-hdr="' + hdrIdx + '" aria-label="remove">' + icon('x') + '</button>';
+        hdrsWrap.insertBefore(hdrDiv, hdrsWrap.lastElementChild);
+      }
+      return;
+    }
+    if (target.closest('[data-dlg-del-hdr]')) {
+      var hdrRow = target.closest('.chat-hdr-row');
+      if (hdrRow && hdrRow.parentNode) hdrRow.parentNode.removeChild(hdrRow);
+      return;
+    }
 
     // 汉堡 / 抽屉
     if (target.closest('[data-chat-left-toggle]')) {
@@ -2434,8 +2513,20 @@
       toggleMcpTool(mcpTool.getAttribute('data-chat-mcp-tool-toggle'));
       return;
     }
+    var mcpFetch = target.closest('[data-chat-mcp-fetch]');
+    if (mcpFetch) {
+      fetchMcpTools(mcpFetch.getAttribute('data-chat-mcp-fetch'));
+      return;
+    }
+    var mcpToolsT = target.closest('[data-chat-mcp-toggle-tools]');
+    if (mcpToolsT) {
+      var mtId = mcpToolsT.getAttribute('data-chat-mcp-toggle-tools');
+      state.mcpOpen[mtId] = state.mcpOpen[mtId] === false ? true : false;
+      rerender();
+      return;
+    }
     if (target.closest('[data-chat-add-mcp]')) {
-      openDialog('mcp', { protocol: 'https' });
+      openDialog('mcp', { protocol: 'https', enabled: true });
       return;
     }
     var mcpEdit = target.closest('[data-chat-mcp-edit]');
@@ -2601,6 +2692,43 @@
     rerender();
   }
 
+  function fetchMcpTools(id) {
+    var entry = (state.config.mcp || []).filter(function (s) { return s.id === id; })[0];
+    if (!entry) return;
+    state.mcpBusy = id;
+    rerender();
+    App.api
+      .post('/api/chat/mcp/tools', {
+        url: entry.url,
+        protocol: entry.protocol,
+        headers: entry.headers,
+        apiKey: entry.apiKey,
+        authHeader: entry.authHeader,
+      })
+      .then(function (data) {
+        var tools = (data && data.tools) || [];
+        state.config.mcp = (state.config.mcp || []).map(function (s) {
+          if (s.id !== id) return s;
+          return Object.assign({}, s, {
+            tools: tools.map(function (tt) {
+              var old = (s.tools || []).filter(function (x) { return x.name === tt.name; })[0];
+              return { name: tt.name, description: tt.description || '', enabled: old ? old.enabled !== false : true };
+            }),
+          });
+        });
+        state.mcpBusy = null;
+        state.mcpOpen[id] = true;
+        persistConfig();
+        rerender();
+        App.ui.toast(L('chats.toolsFetched', '已获取工具') + ': ' + tools.length);
+      })
+      .catch(function (e) {
+        state.mcpBusy = null;
+        rerender();
+        App.ui.toast(L('chats.toolsFetchFailed', '获取工具失败') + ': ' + ((e && e.message) || e), 'error');
+      });
+  }
+
   function fetchModels(providerId) {
     state.models[providerId] = { loading: true };
     rerenderRight();
@@ -2659,7 +2787,17 @@
         return;
       }
       var mcpId = d.id || uid('mcp');
-      var entryM = { id: mcpId, name: mn || mcpId, url: mu, protocol: d.protocol || 'https', enabled: d.enabled !== false, tools: d.tools || [] };
+      var mcpKey = dlgField('apiKey').trim();
+      var mcpAuthHdr = dlgField('authHeader').trim();
+      var mcpSort = parseInt(dlgField('sort') || '0', 10);
+      if (!isFinite(mcpSort)) mcpSort = 0;
+      var mcpHdrs = {};
+      document.querySelectorAll('[data-chat-dialog] .chat-hdr-row').forEach(function (r) {
+        var hk = r.querySelector('[data-dlg-hkey]');
+        var hv = r.querySelector('[data-dlg-hval]');
+        if (hk && hv && hk.value.trim()) mcpHdrs[hk.value.trim()] = hv.value;
+      });
+      var entryM = { id: mcpId, name: mn || mcpId, url: mu, protocol: d.protocol || 'https', enabled: d.enabled !== false, apiKey: mcpKey, authHeader: mcpAuthHdr, sort: mcpSort, headers: mcpHdrs, tools: d.tools || [] };
       var mExists = (state.config.mcp || []).filter(function (s) { return s.id === mcpId; })[0];
       if (mExists) {
         state.config.mcp = state.config.mcp.map(function (s) { return s.id === mcpId ? Object.assign({}, s, entryM, { tools: s.tools || [] }) : s; });
