@@ -613,3 +613,122 @@
   flex-direction: column;
   gap: 0.25rem;
 }
+
+/* ---------- 大模型全局设置页(供应商 / MCP / 默认参数 / API Key) ---------- */
+.sp-llm {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.sp-llm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sp-llm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.75rem;
+  background: var(--card);
+}
+.sp-llm-row-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.sp-llm-row-main .sp-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-llm-row-main .sp-field-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+.sp-llm-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.375rem;
+}
+.sp-llm-btn {
+  display: inline-flex;
+  height: 1.875rem;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--background);
+  padding: 0 0.625rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-llm-btn:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.sp-llm-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.sp-llm-btn.is-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.sp-llm-btn.is-primary:hover {
+  background: color-mix(in oklab, var(--primary) 88%, var(--background));
+  color: var(--primary-foreground);
+}
+.sp-llm-btn.is-danger {
+  color: var(--destructive);
+}
+.sp-llm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  background: var(--muted);
+}
+.sp-llm-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sp-llm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.875rem;
+}
+@media (max-width: 640px) {
+  .sp-llm-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.sp-llm-modelrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sp-llm-modelrow .sp-input {
+  flex: 1;
+  min-width: 0;
+}
+.sp-llm-savebar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}

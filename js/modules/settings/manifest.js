@@ -37,6 +37,11 @@ App.registerModule({
       title: { 'zh-CN': '显示', 'zh-TW': '顯示', en: 'Display' },
       route: '/settings/display',
     },
+    {
+      id: 'llm',
+      title: { 'zh-CN': '大模型', 'zh-TW': '大模型', en: 'LLM Models' },
+      route: '/settings/llm',
+    },
   ],
   i18nFile: 'i18n.js',
 });

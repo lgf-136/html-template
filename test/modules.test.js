@@ -124,7 +124,10 @@ test('chats: 包含三栏布局、会话搜索与流式发送交互标记', asyn
   assert.match(r.text, /data-chat-composer/);
   assert.match(r.text, /data-chat-toggle="mcp"/);
   assert.match(r.text, /data-chat-toggle="web"/);
-  assert.match(r.text, /data-chat-attach="upload"/);
+  assert.match(r.text, /data-chat-toggle="thinking"/);
+  assert.match(r.text, /data-chat-attach="upload-image"/);
+  assert.match(r.text, /data-chat-attach="upload-file"/);
+  assert.match(r.text, /data-chat-dd-trigger="mcp"/);
   assert.match(r.text, /data-chat-send/);
   // 右侧:参数设置 / MCP / Agent 三个 tab
   assert.match(r.text, /data-chat-right-tab=/);

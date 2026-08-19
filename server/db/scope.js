@@ -18,7 +18,7 @@ const GLOBAL_SETTINGS_KEYS = ['settings:workspaces', 'settings:activeWorkspace']
 
 /** 键是否为全局键(写入 / 读取时落到 global 作用域) */
 function isGlobalSettingsKey(key) {
-  return GLOBAL_SETTINGS_KEYS.indexOf(key) !== -1;
+  return GLOBAL_SETTINGS_KEYS.indexOf(key) !== -1 || String(key || '').indexOf('llm:') === 0;
 }
 
 /** 依据键名决定归属作用域:全局键 → global;其余 → 指定工作空间(缺省回落 global) */

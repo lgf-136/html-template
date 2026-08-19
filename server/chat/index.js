@@ -23,6 +23,7 @@
 'use strict';
 
 const { GLOBAL_WORKSPACE_ID } = require('../db/scope');
+const { isSensitiveKey } = require('../security/sensitive');
 const { providerById } = require('./providers');
 const { createMcpClient } = require('./mcp');
 const { webSearch } = require('./search');
@@ -215,16 +216,44 @@ function createChat(deps) {
     return cfg;
   }
 
+  /** 读取全局大模型设置(供应商 / MCP / 默认参数 / API Key,app_settings llm:* 前缀,global 作用域) */
+  async function loadGlobalLlm() {
+    const rows = await db.query(
+      "SELECT key, value FROM app_settings WHERE workspace_id = ? AND key LIKE 'llm:%'",
+      [GLOBAL_WORKSPACE_ID]
+    );
+    const out = {};
+    (rows || []).forEach(function (r) {
+      out[r.key] = isSensitiveKey(r.key) ? decrypt(r.value) || '' : r.value;
+    });
+    return out;
+  }
+
   async function loadAll() {
     const ws = await resolveWorkspace();
+    const global = await loadGlobalLlm();
     const row = await db.get('SELECT config, secrets FROM chat_config WHERE workspace_id = ?', [ws]);
-    let config = parseJson(row && row.config, null);
-    if (!isPlainObject(config)) config = defaultConfig();
-    config = normalizeConfig(config);
+    const local = parseJson(row && row.config, null);
+
+    // 合并:全局 llm:* 作为供应商 / MCP / 默认参数 / API Key 的权威来源,
+    // 聊天模块级 config(chat_config)只保留分组/标签/提示词,并可覆盖默认参数。
+    const gProviders = parseJson(global['llm:providers'], null);
+    const gMcp = parseJson(global['llm:mcp'], null);
+    const gDefaults = parseJson(global['llm:defaults'], null);
+    const gKeys = parseJson(global['llm:apikeys'], null);
+    const merged = isPlainObject(local) ? Object.assign({}, local) : defaultConfig();
+    if (Array.isArray(gProviders)) merged.providers = gProviders;
+    if (Array.isArray(gMcp)) merged.mcp = gMcp;
+    if (isPlainObject(gDefaults)) {
+      merged.defaults = Object.assign({}, gDefaults, merged.defaults || {});
+    }
+    const config = normalizeConfig(merged);
+
     let secrets = row && row.secrets ? parseJson(decrypt(row.secrets), {}) : {};
     if (!isPlainObject(secrets)) secrets = {};
     if (!isPlainObject(secrets.providerKeys)) secrets.providerKeys = {};
     if (!isPlainObject(secrets.searchKeys)) secrets.searchKeys = {};
+    if (isPlainObject(gKeys)) secrets.providerKeys = Object.assign({}, secrets.providerKeys, gKeys);
     return { config, secrets };
   }
 

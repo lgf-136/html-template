@@ -45,6 +45,7 @@
   background: var(--card);
 }
 .chat-right.is-collapsed { display: none; }
+.chat-left.is-collapsed { display: none; }
 
 /* ---------- 左栏 ---------- */
 .chat-left-head {
@@ -93,14 +94,15 @@
 /* 上下 3:7 布局:上面分组/标签,下面会话列表 */
 .chat-side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-side-top {
-  flex: 0 0 30%;
+  flex: 1 1 60%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--border);
   overflow-y: auto;
 }
-.chat-side-bottom { flex: 1 1 70%; min-height: 0; display: flex; flex-direction: column; }
+.chat-side-bottom { flex: 0 0 40%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.chat-side-tree { flex: 1; min-height: 0; overflow-y: auto; }
 .chat-side-section-head {
   display: flex;
   align-items: center;
@@ -222,7 +224,7 @@
   min-height: 3rem;
 }
 .chat-hamburger {
-  display: none;
+  display: inline-flex;
   width: 2rem; height: 2rem;
   align-items: center; justify-content: center;
   border: 0; border-radius: 0.5rem;
@@ -646,3 +648,12 @@
   .chat-hamburger { display: inline-flex; }
   .chat-msg-body { max-width: 92%; }
 }
+
+/* ---------- 输入框 MCP 工具弹层 ---------- */
+.chat-mcp-pop { border-top: 1px solid var(--border); padding: 0.25rem 0; }
+.chat-mcp-pop-server { display: flex; align-items: center; gap: 0.4rem; padding: 0.375rem 0.5625rem; }
+.chat-mcp-pop-name { flex: 1; min-width: 0; font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-mcp-pop-tool { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.5625rem 0.25rem 1.5rem; }
+.chat-mcp-pop-tool.is-disabled { opacity: 0.45; }
+.chat-mcp-pop-tool.is-empty { color: var(--muted-foreground); font-size: 0.75rem; }
+.chat-mcp-pop-toolname { flex: 1; min-width: 0; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

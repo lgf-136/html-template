@@ -125,7 +125,7 @@
     filter: 'all', // all / fav / pin / archive
     rightTab: 'params',
     rightOpen: false,
-    leftOpen: false,
+    leftOpen: true,
     scrim: false,
     input: '',
     attachments: [],
@@ -934,8 +934,8 @@
   function rerenderList() {
     var el = document.querySelector('[data-chat-conv-list]');
     if (el) el.outerHTML = convListHtml();
-    var top = document.querySelector('[data-chat-side-top]');
-    if (top) top.outerHTML = sideTopHtml();
+    var tree = document.querySelector('[data-chat-side-tree]');
+    if (tree) tree.outerHTML = sideTopHtml();
   }
   function rerenderMain() {
     var el = document.querySelector('[data-chat-main]');
@@ -957,11 +957,14 @@
   /* ---------- 左栏 ---------- */
   function leftHtml() {
     return (
-      '<aside class="chat-left' + (state.leftOpen ? ' is-open' : '') + '" data-chat-left>' +
+      '<aside class="chat-left' + (state.leftOpen ? ' is-open' : ' is-collapsed') + '" data-chat-left>' +
       '<div class="chat-left-head">' +
-      '<div class="chat-left-title">' + icon('messages-square', 'size-4') + '<span>' + L('chats.inbox', 'Conversations') + '</span></div>' +
+      '<button type="button" class="chat-composer-btn" data-chat-left-toggle data-tip="' + L('chats.collapseSidebar', 'Collapse sidebar') + '">' + icon('panel-left') + '</button>' +
+      '<div class="chat-left-title"><span>' + L('chats.inbox', 'Conversations') + '</span></div>' +
       '<button type="button" class="chat-composer-btn" data-chat-new data-tip="' + L('chats.newChat', 'New chat') + '">' + icon('plus') + '</button>' +
       '</div>' +
+      '<div class="chat-side-body">' +
+      '<div class="chat-side-top">' +
       '<div class="chat-side-search">' +
       App.ui.searchInput.html({
         placeholder: L('chats.searchConversations', 'Search conversations…'),
@@ -970,15 +973,24 @@
         clearLabel: 'x',
       }) +
       '</div>' +
+      filterRowHtml() +
+      '<div class="chat-conv-list" data-chat-conv-list>' + convListHtml() + '</div>' +
+      '</div>' +
+      '<div class="chat-side-bottom">' +
       '<div class="chat-side-tabs">' +
       '<button type="button" class="chat-side-tab' + (state.sideTab === 'groups' ? ' is-active' : '') + '" data-chat-side-tab="groups">' + icon('folder') + L('chats.groups', 'Groups') + '</button>' +
       '<button type="button" class="chat-side-tab' + (state.sideTab === 'tags' ? ' is-active' : '') + '" data-chat-side-tab="tags">' + icon('hash') + L('chats.tags', 'Tags') + '</button>' +
       '</div>' +
-      '<div class="chat-side-body">' +
-      '<div class="chat-side-top" data-chat-side-top>' + sideTopHtml() + '</div>' +
-      '<div class="chat-side-bottom">' +
-      filterRowHtml() +
-      '<div class="chat-conv-list" data-chat-conv-list>' + convListHtml() + '</div>' +
+      '<div class="chat-side-search">' +
+      App.ui.searchInput.html({
+        placeholder: L('chats.searchGroups', 'Search groups / tags…'),
+        value: state.sideSearch,
+        attrs: 'data-chat-side-search',
+        class: 'is-compact',
+        clearLabel: 'x',
+      }) +
+      '</div>' +
+      '<div class="chat-side-tree" data-chat-side-tree>' + sideTopHtml() + '</div>' +
       '</div>' +
       '</div>' +
       '</aside>'
@@ -996,9 +1008,6 @@
         '<button type="button" class="chat-composer-btn" data-chat-group-add data-tip="' + L('chats.newGroup', 'New group') + '">' + icon('plus') + '</button>';
       return (
         '<div class="chat-side-section-head"><span>' + L('chats.groups', 'Groups') + '</span>' + addBtn + '</div>' +
-        '<div class="chat-side-search" style="padding-top:0.125rem">' +
-        App.ui.searchInput.html({ placeholder: L('chats.searchGroups', 'Search groups…'), value: state.sideSearch, attrs: 'data-chat-side-search', class: 'is-compact', clearLabel: 'x' }) +
-        '</div>' +
         '<div class="chat-tree-list">' +
         '<button type="button" class="chat-tree-row' + (!state.groupFilter ? ' is-active' : '') + '" data-chat-group-filter="">' + icon('layers', 'size-4') + '<span>全部</span><span class="chat-tree-count">' + groupCount('') + '</span></button>' +
         (list.length
@@ -1023,9 +1032,6 @@
       '<button type="button" class="chat-composer-btn" data-chat-tag-add data-tip="' + L('chats.newTag', 'New tag') + '">' + icon('plus') + '</button>';
     return (
       '<div class="chat-side-section-head"><span>' + L('chats.tags', 'Tags') + '</span>' + addTag + '</div>' +
-      '<div class="chat-side-search" style="padding-top:0.125rem">' +
-      App.ui.searchInput.html({ placeholder: L('chats.searchTags', 'Search tags…'), value: state.sideSearch, attrs: 'data-chat-side-search', class: 'is-compact', clearLabel: 'x' }) +
-      '</div>' +
       '<div class="chat-tree-list">' +
       '<button type="button" class="chat-tree-row' + (!state.tagFilter ? ' is-active' : '') + '" data-chat-tag-filter="">' + icon('hash', 'size-4') + '<span>全部</span></button>' +
       (tlist.length
@@ -1289,6 +1295,7 @@
   function composerHtml() {
     var active = state.active || defaults();
     var provider = providerById(active.provider);
+    var models = providerModels(active.provider);
     return (
       '<div class="chat-composer-wrap">' +
       '<div class="chat-composer" data-chat-composer>' +
@@ -1296,32 +1303,22 @@
       '<textarea class="chat-composer-textarea" data-chat-textarea rows="1" placeholder="' + L('chats.typeMessage', 'Type a message…') + '">' + esc(state.input) + '</textarea>' +
       '<div class="chat-composer-bar">' +
       '<div class="chat-composer-left">' +
-      ddTrigger('provider', (provider ? esc(provider.name) : L('chats.selectProvider', 'Provider')), 'chat-set-provider') +
-      ddTrigger('model', active.model ? esc(active.model) : L('chats.selectModel', 'Model'), 'chat-set-model') +
-      ddTrigger('thinking', thinkingLabel(active.thinking), 'chat-set-thinking') +
-      '<button type="button" class="chat-composer-btn' + (active.mcpEnabled ? ' is-on' : '') + '" data-chat-toggle="mcp">' + icon('plug-zap') + L('chats.mcpEnabled', 'MCP') + '</button>' +
+      composerDd('provider', provider ? esc(provider.name) : L('chats.selectProvider', 'Provider'), composerProviderMenu(active)) +
+      composerDd('model', active.model ? esc(active.model) : L('chats.selectModel', 'Model'), composerModelMenu(active, models)) +
+      '<button type="button" class="chat-composer-btn' + (thinkingOn(active) ? ' is-on' : '') + '" data-chat-toggle="thinking" data-tip="' + L('chats.thinkingLabel', 'Thinking') + '">' + icon('brain') + '</button>' +
+      mcpComposerHtml(active) +
       '</div>' +
       '<div class="chat-composer-right">' +
-      attachDropdownHtml() +
-      '<div class="chat-dd">' +
-      '<button type="button" class="chat-composer-btn' + (active.webSearch ? ' is-on' : '') + '" data-chat-dd-trigger="web">' + icon('globe') + '<span>' + L('chats.webSearch', 'Web') + '</span></button>' +
-      '<div class="chat-dd-menu" data-chat-dd-menu="web" style="min-width:13rem">' +
-      '<div class="chat-dd-label">' + L('chats.searchProvider', 'Search provider') + '</div>' +
-      '<button type="button" class="chat-dd-item" data-chat-toggle="web"><span>' + L('chats.webSearch', 'Enable web search') + '</span>' + (active.webSearch ? '<span class="chat-dd-check">' + icon('check') + '</span>' : '') + '</button>' +
-      ['duckduckgo', 'serper', 'tavily', 'bing', 'google'].map(function (sp) {
-        return (
-          '<button type="button" class="chat-dd-item' + (active.webSearchProvider === sp ? ' is-active' : '') + '" data-chat-set-webprovider="' + sp + '">' +
-          '<span>' + esc(sp) + '</span>' + (active.webSearchProvider === sp ? '<span class="chat-dd-check">' + icon('check') + '</span>' : '') + '</button>'
-        );
-      }).join('') +
-      '</div>' +
-      '</div>' +
+      imageAttachHtml() +
+      fileAttachHtml() +
+      webComposerHtml(active) +
       '<button type="button" class="chat-send-btn" data-chat-send ' + (canSend() ? '' : 'disabled') + ' aria-label="' + L('chats.send', 'Send') + '">' +
       (state.streaming ? icon('loader-circle', 'size-4') : icon('arrow-up', 'size-4')) +
       '</button>' +
       '</div>' +
       '</div>' +
       '</div>' +
+      '<input type="file" hidden accept="image/*" data-chat-image-input>' +
       '<input type="file" hidden multiple data-chat-file-input>' +
       '</div>'
     );
@@ -1339,24 +1336,113 @@
     );
   }
 
-  function ddTrigger(kind, label, prefix) {
+  function thinkingOn(active) {
+    return !!(active.thinking && active.thinking !== 'none');
+  }
+
+  function composerDd(kind, label, menuHtml) {
     return (
       '<div class="chat-dd">' +
-      '<button type="button" class="chat-composer-btn" data-chat-dd-trigger="' + kind + '">' +
+      '<button type="button" class="chat-composer-btn" data-chat-dd-trigger="' + kind + '" data-tip="' + escAttr(label) + '">' +
       '<span class="chat-btn-value">' + label + '</span>' + icon('chevron-down', 'size-3') +
       '</button>' +
+      '<div class="chat-dd-menu" data-chat-dd-menu="' + kind + '">' + menuHtml + '</div>' +
       '</div>'
     );
   }
 
-  function attachDropdownHtml() {
+  function composerProviderMenu(active) {
+    return (
+      '<div class="chat-dd-label">内置供应商</div>' +
+      builtinProviders().map(function (pr) { return ddItem('provider', pr.id, pr.name, active.provider === pr.id); }).join('') +
+      (customProviders().length
+        ? '<div class="chat-dd-label">自定义</div>' + customProviders().map(function (pr) { return ddItem('provider', pr.id, pr.name, active.provider === pr.id); }).join('')
+        : '')
+    );
+  }
+
+  function composerModelMenu(active, models) {
+    return (
+      '<button type="button" class="chat-dd-item" data-chat-input-model><span style="color:var(--muted-foreground)">手动输入模型名…</span></button>' +
+      (models.length
+        ? models.map(function (m) { return ddItem('model', m, m, active.model === m); }).join('')
+        : '<div class="chat-dd-label">' + L('chats.modelHint', '在右侧参数面板点「获取模型」') + '</div>')
+    );
+  }
+
+  function mcpComposerHtml(active) {
+    var mcp = (state.config && state.config.mcp) || [];
     return (
       '<div class="chat-dd">' +
-      '<button type="button" class="chat-composer-btn" data-chat-dd-trigger="attach">' + icon('paperclip') + '<span>' + L('chats.attach', 'Attach') + '</span></button>' +
-      '<div class="chat-dd-menu" data-chat-dd-menu="attach" style="min-width:12rem">' +
-      '<button type="button" class="chat-dd-item" data-chat-attach="upload">' + icon('upload') + '<span>上传图片 / 文件</span></button>' +
-      '<button type="button" class="chat-dd-item" data-chat-attach="url-image">' + icon('image') + '<span>远程图片 URL</span></button>' +
+      '<button type="button" class="chat-composer-btn' + (active.mcpEnabled ? ' is-on' : '') + '" data-chat-dd-trigger="mcp" data-tip="' + L('chats.mcp', 'MCP tools') + '">' + icon('plug-zap') + '</button>' +
+      '<div class="chat-dd-menu" data-chat-dd-menu="mcp" style="min-width:16rem;max-width:20rem">' +
+      '<div class="chat-dd-label">' + L('chats.mcp', 'MCP tools') + '</div>' +
+      '<button type="button" class="chat-dd-item" data-chat-toggle="mcp"><span>' + L('chats.mcpEnabled', 'Enable MCP') + '</span>' + (active.mcpEnabled ? '<span class="chat-dd-check">' + icon('check') + '</span>' : '') + '</button>' +
+      (mcp.length ? mcp.map(mcpComposerServerHtml).join('') : '<div class="chat-dd-label">' + L('chats.noMcp', '暂无 MCP,请在设置中添加') + '</div>') +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function mcpComposerServerHtml(s) {
+    return (
+      '<div class="chat-mcp-pop">' +
+      '<div class="chat-mcp-pop-server">' +
+      '<span class="chat-switch' + (s.enabled ? ' is-on' : '') + '" data-chat-mcp-toggle="' + escAttr(s.id) + '"></span>' +
+      '<span class="chat-mcp-pop-name">' + esc(s.name || s.id) + '</span>' +
+      '</div>' +
+      ((s.tools && s.tools.length)
+        ? s.tools.map(function (t) {
+            var disabled = !s.enabled;
+            return (
+              '<div class="chat-mcp-pop-tool' + (disabled ? ' is-disabled' : '') + '">' +
+              '<span class="chat-switch' + (t.enabled && !disabled ? ' is-on' : '') + '" data-chat-mcp-tool-toggle="' + escAttr(s.id) + ':' + escAttr(t.name) + '"></span>' +
+              '<span class="chat-mcp-pop-toolname">' + esc(t.name || 'tool') + '</span>' +
+              '</div>'
+            );
+          }).join('')
+        : '<div class="chat-mcp-pop-tool is-empty">' + (s.enabled ? '发送时自动发现工具' : '未启用') + '</div>') +
+      '</div>'
+    );
+  }
+
+  function imageAttachHtml() {
+    return (
+      '<div class="chat-dd">' +
+      '<button type="button" class="chat-composer-btn" data-chat-dd-trigger="image" data-tip="' + L('chats.insertImage', 'Insert image') + '">' + icon('image') + '</button>' +
+      '<div class="chat-dd-menu" data-chat-dd-menu="image" style="min-width:12rem">' +
+      '<button type="button" class="chat-dd-item" data-chat-attach="upload-image">' + icon('upload') + '<span>上传本地图片</span></button>' +
+      '<button type="button" class="chat-dd-item" data-chat-attach="url-image">' + icon('link') + '<span>远程图片 URL</span></button>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function fileAttachHtml() {
+    return (
+      '<div class="chat-dd">' +
+      '<button type="button" class="chat-composer-btn" data-chat-dd-trigger="file" data-tip="' + L('chats.insertFile', 'Insert file') + '">' + icon('paperclip') + '</button>' +
+      '<div class="chat-dd-menu" data-chat-dd-menu="file" style="min-width:12rem">' +
+      '<button type="button" class="chat-dd-item" data-chat-attach="upload-file">' + icon('upload') + '<span>上传本地文件</span></button>' +
       '<button type="button" class="chat-dd-item" data-chat-attach="url-file">' + icon('link') + '<span>远程文件 URL</span></button>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function webComposerHtml(active) {
+    return (
+      '<div class="chat-dd">' +
+      '<button type="button" class="chat-composer-btn' + (active.webSearch ? ' is-on' : '') + '" data-chat-dd-trigger="web" data-tip="' + L('chats.webSearch', 'Web search') + '">' + icon('globe') + '</button>' +
+      '<div class="chat-dd-menu" data-chat-dd-menu="web" style="min-width:13rem">' +
+      '<div class="chat-dd-label">' + L('chats.searchProvider', 'Search provider') + '</div>' +
+      '<button type="button" class="chat-dd-item" data-chat-toggle="web"><span>' + L('chats.webSearch', 'Enable web search') + '</span>' + (active.webSearch ? '<span class="chat-dd-check">' + icon('check') + '</span>' : '') + '</button>' +
+      ['duckduckgo', 'serper', 'tavily', 'bing', 'google'].map(function (sp) {
+        return (
+          '<button type="button" class="chat-dd-item' + (active.webSearchProvider === sp ? ' is-active' : '') + '" data-chat-set-webprovider="' + sp + '">' +
+          '<span>' + esc(sp) + '</span>' + (active.webSearchProvider === sp ? '<span class="chat-dd-check">' + icon('check') + '</span>' : '') + '</button>'
+        );
+      }).join('') +
       '</div>' +
       '</div>'
     );
@@ -1426,7 +1512,7 @@
           '<button type="button" class="chat-dd-item" data-chat-input-model><span style="color:var(--muted-foreground)">手动输入模型名…</span></button>' +
           (models.length ? models.map(function (m) { return ddItem('model', m, m, a.model === m); }).join('') : '<div class="chat-dd-label">' + (provider && provider.id === 'lmstudio' ? '本地模型请手动输入' : '点击下方按钮获取模型列表') + '</div>')
         ) +
-        '<button type="button" class="chat-btn" data-chat-fetch-models title="' + L('chats.fetchModels', 'Fetch models') + '">' + (modelLoading ? icon('loader-circle', 'size-4') : icon('refresh-cw', 'size-4')) + '</button>' +
+        '<button type="button" class="chat-btn" data-chat-fetch-models title="' + L('chats.fetchModels', 'Fetch models') + '">' + (modelLoading ? icon('loader-circle', 'size-4') : icon('refresh-cw', 'size-4')) + '<span>' + L('chats.fetchModels', '获取模型') + '</span></button>' +
         '</div>'
       ) +
       sliderField(L('chats.temperature', 'Temperature'), 'temperature', 0, 2, 0.05, p.temperature, function (v) { return Number(v).toFixed(2); }) +
@@ -1593,6 +1679,9 @@
     } else if (d.kind === 'confirm') {
       title = d.title || L('chats.confirmDelete', 'Confirm');
       body = '<p style="font-size:0.875rem;color:var(--muted-foreground)">' + esc(d.message || '') + '</p>';
+    } else if (d.kind === 'model-input') {
+      title = L('chats.model', 'Model');
+      body = fieldHtml(L('chats.model', 'Model name'), '<input type="text" class="chat-input" data-dlg-field="model" value="' + escAttr(d.value || '') + '" placeholder="model-name">');
     }
     return (
       '<div class="chat-overlay" data-chat-dlg-backdrop>' +
@@ -1976,8 +2065,6 @@
       toggleDd(ddTrigger);
       return;
     }
-    // 弹层内点击不关闭
-    if (target.closest('.chat-dd')) return;
 
     // 上下文菜单动作
     var ctxItemEl = target.closest('[data-chat-ctx]');
@@ -2143,6 +2230,7 @@
       var what = toggle.getAttribute('data-chat-toggle');
       if (what === 'mcp') setActiveParam('mcpEnabled', !state.active.mcpEnabled);
       else if (what === 'web') setActiveParam('webSearch', !state.active.webSearch);
+      else if (what === 'thinking') setActiveParam('thinking', (state.active.thinking && state.active.thinking !== 'none') ? 'none' : 'high');
       rerender();
       return;
     }
@@ -2206,7 +2294,10 @@
     var attach = target.closest('[data-chat-attach]');
     if (attach) {
       var aKind = attach.getAttribute('data-chat-attach');
-      if (aKind === 'upload') {
+      if (aKind === 'upload-image') {
+        var ii = document.querySelector('[data-chat-image-input]');
+        if (ii) ii.click();
+      } else if (aKind === 'upload-file') {
         var fi = document.querySelector('[data-chat-file-input]');
         if (fi) fi.click();
       } else if (aKind === 'url-image') {
@@ -2365,7 +2456,7 @@
     if (!s) return;
     s.enabled = !s.enabled;
     persistConfig();
-    rerenderRight();
+    rerender();
   }
   function toggleMcpTool(key) {
     var parts = key.split(':');
@@ -2374,7 +2465,7 @@
     var t = (s.tools || []).filter(function (x) { return x.name === parts[1]; })[0];
     if (t) t.enabled = t.enabled === false;
     persistConfig();
-    rerenderRight();
+    rerender();
   }
 
   function fetchModels(providerId) {
@@ -2542,8 +2633,8 @@
     }
     if (target.hasAttribute('data-chat-side-search')) {
       state.sideSearch = target.value;
-      var top = document.querySelector('[data-chat-side-top]');
-      if (top) top.outerHTML = sideTopHtml();
+      var tree = document.querySelector('[data-chat-side-tree]');
+      if (tree) tree.outerHTML = sideTopHtml();
       return;
     }
     if (target.hasAttribute('data-chat-textarea')) {
@@ -2574,7 +2665,7 @@
   document.addEventListener('change', function (e) {
     var target = e.target;
     if (!target || !target.getAttribute) return;
-    if (target.hasAttribute('data-chat-file-input')) {
+    if (target.hasAttribute('data-chat-file-input') || target.hasAttribute('data-chat-image-input')) {
       handleFiles(target.files);
       target.value = '';
     }
@@ -2705,7 +2796,10 @@
   }
   function autoGrow(ta) {
     ta.style.height = 'auto';
-    ta.style.height = Math.min(256, ta.scrollHeight) + 'px';
+    var lh = parseFloat(window.getComputedStyle(ta).lineHeight) || 22;
+    var max = lh * 6;
+    ta.style.height = Math.min(max, ta.scrollHeight) + 'px';
+    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
   }
   function updateSendBtn() {
     var btn = document.querySelector('[data-chat-send]');

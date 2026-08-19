@@ -21,9 +21,29 @@
     'stroke-linejoin': 'round',
   };
 
+  /** 图标别名:补齐各模块用到的语义图标(映射到 lucide 集内最接近的图形) */
+  var ICON_ALIASES = {
+    archive: 'package',
+    bot: 'brain-circuit',
+    brain: 'brain-circuit',
+    'circle-x': 'circle-off',
+    'ellipsis-vertical': 'ellipsis',
+    'file-text': 'scroll-text',
+    hash: 'list-filter',
+    image: 'image-plus',
+    'loader-circle': 'rotate-ccw',
+    pin: 'circle-arrow-up',
+    'plug-zap': 'wrench',
+    'refresh-cw': 'rotate-ccw',
+    square: 'x',
+    trash: 'trash-2',
+    upload: 'download',
+  };
+
   /** lucide 图标 → SVG 字符串 */
   function iconSvg(name, attrs) {
-    var node = DATA[name];
+    var key = ICON_ALIASES[name] || name;
+    var node = DATA[key];
     if (!node) return '';
     var merged = Object.assign({}, BASE_ATTRS, attrs || {});
     var svgAttrs = Object.keys(merged)

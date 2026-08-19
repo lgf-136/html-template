@@ -33,6 +33,7 @@
       titleKey: 'notifications.title',
     },
     { id: 'display', route: '/settings/display', icon: 'monitor', titleKey: 'display.title' },
+    { id: 'llm', route: '/settings/llm', icon: 'bot', titleKey: 'llm.title' },
   ];
 
   /* ---------- 通用布局 ---------- */
@@ -859,6 +860,324 @@
     return contentSection(t, 'display.title', 'display.description', body);
   }
 
+  /* ---------- 大模型全局设置(供应商 / MCP / 默认参数 / API Key → app_settings llm:*) ---------- */
+  var LLM_BUILTIN = [
+    { id: 'opencode-go', name: 'OpenCode Go' },
+    { id: 'openai', name: 'OpenAI' },
+    { id: 'anthropic', name: 'Claude (Anthropic)' },
+    { id: 'gemini', name: 'Gemini (Google)' },
+    { id: 'grok', name: 'Grok (xAI)' },
+    { id: 'groq', name: 'Groq' },
+    { id: 'huggingface', name: 'Hugging Face' },
+    { id: 'cerebras', name: 'Cerebras' },
+    { id: 'openrouter', name: 'OpenRouter' },
+    { id: 'deepseek', name: 'DeepSeek' },
+    { id: 'kimi', name: 'Kimi (Moonshot)' },
+    { id: 'glm', name: 'GLM (智谱)' },
+    { id: 'qwen', name: 'Qwen (通义千问)' },
+    { id: 'siliconflow', name: '硅基流动 (SiliconFlow)' },
+    { id: 'mistral', name: 'Mistral' },
+    { id: 'perplexity', name: 'Perplexity' },
+    { id: 'cohere', name: 'Cohere' },
+    { id: 'together', name: 'Together AI' },
+    { id: 'fireworks', name: 'Fireworks AI' },
+    { id: 'ollama', name: 'Ollama (本地)' },
+    { id: 'lmstudio', name: 'LM Studio (本地)' },
+  ];
+
+  var LLM = {
+    providers: [],
+    mcp: [],
+    defaults: {},
+    keys: {},
+    loaded: false,
+    error: null,
+    form: null, // { kind: 'provider'|'mcp', id } 内联表单
+    models: null, // 获取到的模型列表
+    fetchingModels: false,
+  };
+
+  function escLlm(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function llmParseArr(s) {
+    try {
+      var v = JSON.parse(s || '[]');
+      return Array.isArray(v) ? v : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function llmParseObj(s) {
+    try {
+      var v = JSON.parse(s || '{}');
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function llmAllProviders() {
+    var list = LLM_BUILTIN.map(function (b) {
+      return { id: b.id, name: b.name, builtin: true };
+    });
+    (LLM.providers || []).forEach(function (p) {
+      list.push({ id: p.id, name: p.name, builtin: false, baseUrl: p.baseUrl, kind: p.kind });
+    });
+    return list;
+  }
+  function llmProviderName(id) {
+    for (var i = 0; i < LLM_BUILTIN.length; i++) if (LLM_BUILTIN[i].id === id) return LLM_BUILTIN[i].name;
+    for (var j = 0; j < (LLM.providers || []).length; j++) if (LLM.providers[j].id === id) return LLM.providers[j].name;
+    return id || '';
+  }
+
+  function pageLlm(ctx) {
+    var t = ctx.t;
+    var loading = LLM.loaded && !LLM.error ? '' : '<p class="sp-field-desc">加载中…</p>';
+    return contentSection(t, 'llm.title', 'llm.description', '<div data-llm-page class="sp-llm">' + loading + '</div>');
+  }
+
+  function renderLlmPage() {
+    var el = document.querySelector('[data-llm-page]');
+    if (!el) return;
+    var t = moduleT();
+    if (LLM.error) {
+      el.innerHTML = '<p class="sp-field-desc" style="color:var(--destructive)">' + escLlm(LLM.error) + '</p>';
+      return;
+    }
+    el.innerHTML =
+      llmSection(t, 'llm.providers', 'llm.providers.desc', llmProvidersHtml(t)) +
+      llmSection(t, 'llm.apikeys', 'llm.apikeys.desc', llmKeysHtml(t)) +
+      llmSection(t, 'llm.mcp', 'llm.mcp.desc', llmMcpHtml(t)) +
+      llmSection(t, 'llm.defaults', 'llm.defaults.desc', llmDefaultsHtml(t));
+  }
+
+  function llmSection(t, titleKey, descKey, body) {
+    return (
+      '<div class="sp-section"><h3>' + t(titleKey) + '</h3><p class="sp-section-desc">' + t(descKey) +
+      '</p><div class="sp-sep"></div><div class="sp-section-body"><div class="sp-section-inner">' + body +
+      '</div></div></div>'
+    );
+  }
+
+  function llmProvidersHtml(t) {
+    var rows = (LLM.providers || []).map(function (p) {
+      return (
+        '<div class="sp-llm-row"><div class="sp-llm-row-main"><span class="sp-label">' + escLlm(p.name) + '</span>' +
+        '<span class="sp-field-desc">' + escLlm(p.baseUrl) + ' · ' + escLlm(p.kind || 'openai') + '</span></div>' +
+        '<div class="sp-llm-row-actions">' +
+        '<button type="button" data-llm-edit-provider="' + escLlm(p.id) + '" class="sp-llm-btn">' + t('llm.edit') + '</button>' +
+        '<button type="button" data-llm-del-provider="' + escLlm(p.id) + '" class="sp-llm-btn is-danger">' + t('llm.delete') + '</button>' +
+        '</div></div>'
+      );
+    }).join('');
+    if (!rows) rows = '<p class="sp-field-desc">' + t('llm.providers.desc') + '</p>';
+    var form = '';
+    if (LLM.form && LLM.form.kind === 'provider') {
+      var editing = (LLM.providers || []).filter(function (p) { return p.id === LLM.form.id; })[0] || {};
+      form = llmProviderFormHtml(t, editing);
+    }
+    return (
+      '<div class="sp-llm-list">' + rows + '</div>' +
+      (form || '<button type="button" data-llm-add-provider class="sp-llm-btn is-primary">' + t('llm.addProvider') + '</button>')
+    );
+  }
+
+  function llmProviderFormHtml(t, p) {
+    var kind = p.kind || 'openai';
+    return (
+      '<div class="sp-llm-form">' +
+      '<input class="sp-input" data-llm-f-name placeholder="' + t('llm.name') + '" value="' + escLlm(p.name) + '">' +
+      '<input class="sp-input" data-llm-f-base placeholder="' + t('llm.baseUrl') + ' (https://api.example.com/v1)" value="' + escLlm(p.baseUrl) + '">' +
+      '<input class="sp-input" data-llm-f-kind placeholder="' + t('llm.kind') + ' (openai / anthropic)" value="' + escLlm(kind) + '">' +
+      '<input class="sp-input" data-llm-f-models placeholder="' + t('llm.models') + '" value="' + escLlm((p.models || []).join(',')) + '">' +
+      '<div class="sp-llm-form-actions">' +
+      '<button type="button" data-llm-save-provider class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
+      '<button type="button" data-llm-cancel-form class="sp-llm-btn">' + t('llm.cancel') + '</button>' +
+      '</div></div>'
+    );
+  }
+
+  function llmKeysHtml(t) {
+    var rows = llmAllProviders().map(function (p) {
+      return (
+        '<div class="sp-field"><label class="sp-label">' + escLlm(p.name) + '</label>' +
+        '<input type="password" class="sp-input" data-llm-key="' + escLlm(p.id) + '" placeholder="API Key" autocomplete="off" value="' + escLlm(LLM.keys[p.id] || '') + '"></div>'
+      );
+    }).join('');
+    return (
+      '<div class="sp-llm-grid">' + rows + '</div>' +
+      '<div class="sp-llm-savebar"><button type="button" data-llm-save-keys class="sp-llm-btn is-primary">' + t('llm.save') + '</button></div>'
+    );
+  }
+
+  function llmMcpHtml(t) {
+    var rows = (LLM.mcp || []).map(function (s) {
+      return (
+        '<div class="sp-llm-row"><div class="sp-llm-row-main"><span class="sp-label">' + escLlm(s.name) + '</span>' +
+        '<span class="sp-field-desc">' + escLlm(s.url) + ' · ' + escLlm(s.protocol || 'https') + '</span></div>' +
+        '<div class="sp-llm-row-actions">' +
+        '<span role="switch" aria-checked="' + (!!s.enabled) + '" class="sp-switch' + (s.enabled ? ' is-on' : '') + '" data-llm-mcp-toggle="' + escLlm(s.id) + '"></span>' +
+        '<button type="button" data-llm-edit-mcp="' + escLlm(s.id) + '" class="sp-llm-btn">' + t('llm.edit') + '</button>' +
+        '<button type="button" data-llm-del-mcp="' + escLlm(s.id) + '" class="sp-llm-btn is-danger">' + t('llm.delete') + '</button>' +
+        '</div></div>'
+      );
+    }).join('');
+    if (!rows) rows = '<p class="sp-field-desc">' + t('llm.mcp.desc') + '</p>';
+    var form = '';
+    if (LLM.form && LLM.form.kind === 'mcp') {
+      var editing = (LLM.mcp || []).filter(function (s) { return s.id === LLM.form.id; })[0] || {};
+      form = llmMcpFormHtml(t, editing);
+    }
+    return (
+      '<div class="sp-llm-list">' + rows + '</div>' +
+      (form || '<button type="button" data-llm-add-mcp class="sp-llm-btn is-primary">' + t('llm.addMcp') + '</button>')
+    );
+  }
+
+  function llmMcpFormHtml(t, s) {
+    var protocol = s.protocol || 'https';
+    return (
+      '<div class="sp-llm-form">' +
+      '<input class="sp-input" data-llm-f-name placeholder="' + t('llm.name') + '" value="' + escLlm(s.name) + '">' +
+      '<input class="sp-input" data-llm-f-url placeholder="' + t('llm.url') + ' (https://…或 sse://…)" value="' + escLlm(s.url) + '">' +
+      '<input class="sp-input" data-llm-f-protocol placeholder="' + t('llm.protocol') + ' (https / sse)" value="' + escLlm(protocol) + '">' +
+      '<div class="sp-llm-form-actions">' +
+      '<button type="button" data-llm-save-mcp class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
+      '<button type="button" data-llm-cancel-form class="sp-llm-btn">' + t('llm.cancel') + '</button>' +
+      '</div></div>'
+    );
+  }
+
+  function llmDropdown(t, name, options, value, attr) {
+    var sel = options.filter(function (o) { return o.value === value; })[0] || options[0];
+    var opts = options.map(function (o) {
+      return (
+        '<button type="button" role="option" ' + attr + '="' + escLlm(o.value) + '" class="' +
+        App.ui.dropdownItemClass(o.value === value ? ' bg-accent text-accent-foreground' : '') + '">' +
+        '<span class="flex-1 text-left">' + escLlm(o.label) + '</span>' +
+        (o.value === value ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>'
+      );
+    }).join('');
+    return (
+      '<div class="relative" data-dropdown>' +
+      '<button type="button" data-dropdown-trigger class="sp-select-trigger" aria-haspopup="listbox">' +
+      '<span class="sp-select-label">' + escLlm(sel.label) + '</span>' +
+      '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
+      '</button>' +
+      '<div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + opts + '</div>' +
+      '</div>'
+    );
+  }
+
+  function llmDefaultsHtml(t) {
+    var d = LLM.defaults || {};
+    var params = d.params || {};
+    var provider = d.provider || 'opencode-go';
+    var model = d.model || '';
+    var thinking = d.thinking || 'none';
+    var modelOpts = '';
+    if (LLM.models && LLM.models.length) {
+      modelOpts = LLM.models.map(function (m) {
+        return '<button type="button" role="option" data-llm-model-opt="' + escLlm(m) + '" class="' +
+          App.ui.dropdownItemClass(m === model ? ' bg-accent text-accent-foreground' : '') + '">' +
+          '<span class="flex-1 text-left">' + escLlm(m) + '</span>' + (m === model ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>';
+      }).join('');
+    }
+    var providerOpts = llmAllProviders().map(function (p) {
+      return '<button type="button" role="option" data-llm-provider-opt="' + escLlm(p.id) + '" class="' +
+        App.ui.dropdownItemClass(p.id === provider ? ' bg-accent text-accent-foreground' : '') + '">' +
+        '<span class="flex-1 text-left">' + escLlm(p.name) + '</span>' + (p.id === provider ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>';
+    }).join('');
+    var thinkOpts = ['none', 'low', 'medium', 'high'].map(function (v) {
+      return '<button type="button" role="option" data-llm-thinking-opt="' + v + '" class="' +
+        App.ui.dropdownItemClass(v === thinking ? ' bg-accent text-accent-foreground' : '') + '">' +
+        '<span class="flex-1 text-left">' + v + '</span>' + (v === thinking ? icon().iconSvg('check', { class: 'size-4' }) : '') + '</button>';
+    }).join('');
+
+    function field(labelKey, inner) {
+      return '<div class="sp-field"><label class="sp-label">' + t(labelKey) + '</label>' + inner + '</div>';
+    }
+    function numField(labelKey, key, val, placeholder) {
+      return field(labelKey, '<input class="sp-input" data-llm-field="' + key + '" value="' + escLlm(val) + '" placeholder="' + escLlm(placeholder) + '">');
+    }
+    return (
+      '<div class="sp-llm-grid">' +
+      field('llm.provider',
+        '<div class="relative" data-dropdown><button type="button" data-dropdown-trigger class="sp-select-trigger">' +
+        '<span class="sp-select-label">' + escLlm(llmProviderName(provider)) + '</span>' +
+        '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
+        '</button><div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + providerOpts + '</div></div>') +
+      field('llm.model',
+        '<div class="sp-llm-modelrow"><input class="sp-input" data-llm-field="model" value="' + escLlm(model) + '" placeholder="' + t('llm.model') + '">' +
+        '<button type="button" data-llm-fetch-models class="sp-llm-btn" ' + (LLM.fetchingModels ? 'disabled' : '') + '>' + t('llm.fetchModels') + '</button></div>' +
+        (modelOpts ? '<div class="relative" data-dropdown style="margin-top:0.375rem"><button type="button" data-dropdown-trigger class="sp-select-trigger"><span class="sp-select-label">选择模型…</span><svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button><div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + modelOpts + '</div></div>' : '')) +
+      numField('llm.temperature', 'temperature', params.temperature != null ? params.temperature : 0.7, '0-2'),
+      numField('llm.topP', 'topP', params.topP != null ? params.topP : 1, '0-1'),
+      numField('llm.topK', 'topK', params.topK != null ? params.topK : 0, '0-1000'),
+      numField('llm.maxTokens', 'maxTokens', params.maxTokens != null ? params.maxTokens : 8192, '如 8k / 1M'),
+      field('llm.thinking',
+        '<div class="relative" data-dropdown><button type="button" data-dropdown-trigger class="sp-select-trigger"><span class="sp-select-label">' + thinking + '</span>' +
+        '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
+        '</button><div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + thinkOpts + '</div></div>') +
+      '</div>' +
+      '<div class="sp-llm-savebar"><button type="button" data-llm-save-defaults class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
+      '<span class="sp-field-desc">' + t('llm.savedDesc') + '</span></div>'
+    );
+  }
+
+  function loadLlmPage() {
+    App.api.get('/api/settings').then(function (raw) {
+      LLM.providers = llmParseArr(raw['llm:providers']);
+      LLM.mcp = llmParseArr(raw['llm:mcp']);
+      LLM.defaults = llmParseObj(raw['llm:defaults']);
+      LLM.keys = llmParseObj(raw['llm:apikeys']);
+      LLM.loaded = true;
+      LLM.error = null;
+      renderLlmPage();
+    }).catch(function (e) {
+      LLM.loaded = true;
+      LLM.error = (e && e.message) || '加载失败';
+      renderLlmPage();
+    });
+  }
+
+  function llmSave(next) {
+    var payload = {
+      'llm:providers': JSON.stringify(next.providers || []),
+      'llm:mcp': JSON.stringify(next.mcp || []),
+      'llm:defaults': JSON.stringify(next.defaults || {}),
+      'llm:apikeys': JSON.stringify(next.keys || {}),
+    };
+    App.api.put('/api/settings', { settings: payload }).then(function () {
+      LLM.providers = next.providers || [];
+      LLM.mcp = next.mcp || [];
+      LLM.defaults = next.defaults || {};
+      LLM.keys = next.keys || {};
+      App.ui.toast(moduleT()('llm.saved'));
+      renderLlmPage();
+    }).catch(function (e) {
+      App.ui.toast('保存失败: ' + ((e && e.message) || ''), 'error');
+    });
+  }
+
+  function llmClone() {
+    return {
+      providers: (LLM.providers || []).slice(),
+      mcp: (LLM.mcp || []).slice(),
+      defaults: JSON.parse(JSON.stringify(LLM.defaults || {})),
+      keys: Object.assign({}, LLM.keys || {}),
+    };
+  }
+
+  function llmUid(prefix) {
+    return (prefix || 'llm') + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+  }
+
   /* ---------- 分发 ---------- */
   var PAGES = {
     profile: pageProfile,
@@ -866,6 +1185,7 @@
     appearance: pageAppearance,
     notifications: pageNotifications,
     display: pageDisplay,
+    llm: pageLlm,
   };
 
   function render(route, ctx) {
@@ -962,6 +1282,240 @@
         var t = moduleT();
         rerenderCalendar(t, App.getShellContext().settings.locale);
       }
+      return;
+    }
+  });
+
+  /* ---------- 大模型设置页交互(供应商/MCP CRUD、默认参数、模型获取、API Key) ---------- */
+  function llmField(name) {
+    var el = document.querySelector('[data-llm-f-' + name + ']');
+    return el ? el.value : '';
+  }
+  function llmDefaultField(name) {
+    var el = document.querySelector('[data-llm-field="' + name + '"]');
+    return el ? el.value : '';
+  }
+  function llmNum(v, def) {
+    var n = Number(v);
+    return Number.isFinite(n) ? n : def;
+  }
+  function llmParseTokens(v) {
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return null;
+    var m = s.match(/^([\d.]+)\s*(k|m)?$/);
+    if (!m) {
+      var n = Number(s);
+      return Number.isFinite(n) ? Math.round(n) : null;
+    }
+    var num = parseFloat(m[1]);
+    var mult = m[2] === 'm' ? 1000000 : m[2] === 'k' ? 1000 : 1;
+    return Math.round(num * mult);
+  }
+
+  /** 把默认参数面板里正在编辑的文本输入同步回内存,避免下拉选项点击重渲染时丢输入 */
+  function llmSyncDefaultsFromDom() {
+    var d = LLM.defaults || {};
+    LLM.defaults = d;
+    var modelEl = document.querySelector('[data-llm-field="model"]');
+    if (modelEl) d.model = modelEl.value.trim();
+    var params = d.params || {};
+    d.params = params;
+    ['temperature', 'topP', 'topK'].forEach(function (k) {
+      var el = document.querySelector('[data-llm-field="' + k + '"]');
+      if (el && el.value !== '') params[k] = llmNum(el.value, params[k] == null ? 0 : params[k]);
+    });
+    var mt = document.querySelector('[data-llm-field="maxTokens"]');
+    if (mt && mt.value !== '') {
+      var parsed = llmParseTokens(mt.value);
+      if (parsed != null) params.maxTokens = parsed;
+    }
+  }
+
+  function llmSaveProvider() {
+    var name = llmField('name').trim();
+    var baseUrl = llmField('base').trim();
+    var kind = (llmField('kind').trim() || 'openai').toLowerCase();
+    if (!name) {
+      App.ui.toast('名称必填', 'error');
+      return;
+    }
+    var models = llmField('models')
+      .split(',')
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    var id =
+      (LLM.form && LLM.form.id) ||
+      'cust-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    var entry = {
+      id: id,
+      name: name,
+      baseUrl: baseUrl,
+      kind: kind === 'anthropic' ? 'anthropic' : 'openai',
+      models: models,
+    };
+    var next = llmClone();
+    var exists = next.providers.filter(function (p) { return p.id === id; })[0];
+    if (exists) next.providers = next.providers.map(function (p) { return p.id === id ? entry : p; });
+    else next.providers.push(entry);
+    LLM.form = null;
+    llmSave(next);
+  }
+
+  function llmSaveMcp() {
+    var name = llmField('name').trim();
+    var url = llmField('url').trim();
+    var protocol = (llmField('protocol').trim() || 'https').toLowerCase();
+    if (!url) {
+      App.ui.toast('URL 必填', 'error');
+      return;
+    }
+    var id = (LLM.form && LLM.form.id) || llmUid('mcp');
+    var entry = {
+      id: id,
+      name: name || id,
+      url: url,
+      protocol: protocol === 'sse' ? 'sse' : 'https',
+      enabled: true,
+      tools: [],
+    };
+    var next = llmClone();
+    var exists = next.mcp.filter(function (s) { return s.id === id; })[0];
+    if (exists) entry = Object.assign({}, exists, entry, { enabled: exists.enabled !== false });
+    if (exists) next.mcp = next.mcp.map(function (s) { return s.id === id ? entry : s; });
+    else next.mcp.push(entry);
+    LLM.form = null;
+    llmSave(next);
+  }
+
+  function llmSaveDefaults() {
+    llmSyncDefaultsFromDom();
+    llmSave(llmClone());
+  }
+
+  function llmSaveKeys() {
+    var next = llmClone();
+    var keys = {};
+    document.querySelectorAll('[data-llm-key]').forEach(function (el) {
+      var id = el.getAttribute('data-llm-key');
+      var val = el.value.trim();
+      if (val) keys[id] = val;
+    });
+    next.keys = keys;
+    llmSave(next);
+  }
+
+  function llmFetchModels() {
+    llmSyncDefaultsFromDom();
+    var provider = LLM.defaults.provider || 'opencode-go';
+    var key = LLM.keys[provider] || '';
+    LLM.fetchingModels = true;
+    renderLlmPage();
+    App.api
+      .post('/api/chat/models', { providerId: provider, apiKey: key })
+      .then(function (data) {
+        LLM.models = (data && data.models) || [];
+        LLM.fetchingModels = false;
+        if (LLM.models.length && !LLM.defaults.model) LLM.defaults.model = LLM.models[0];
+        renderLlmPage();
+      })
+      .catch(function (e) {
+        LLM.fetchingModels = false;
+        LLM.models = [];
+        App.ui.toast((e && e.message) || '获取模型失败', 'error');
+        renderLlmPage();
+      });
+  }
+
+  document.addEventListener('app:afterRender', function (ev) {
+    var detail = ev.detail || {};
+    if (detail.path !== '/settings/llm') return;
+    LLM.form = null;
+    LLM.models = null;
+    LLM.fetchingModels = false;
+    loadLlmPage();
+  });
+
+  document.addEventListener('click', function (e) {
+    var target = e.target;
+    if (!target || !target.closest) return;
+
+    var addProvider = target.closest('[data-llm-add-provider]');
+    if (addProvider) { LLM.form = { kind: 'provider', id: null }; renderLlmPage(); return; }
+    var editProvider = target.closest('[data-llm-edit-provider]');
+    if (editProvider) {
+      LLM.form = { kind: 'provider', id: editProvider.getAttribute('data-llm-edit-provider') };
+      renderLlmPage();
+      return;
+    }
+    var delProvider = target.closest('[data-llm-del-provider]');
+    if (delProvider) {
+      var pid = delProvider.getAttribute('data-llm-del-provider');
+      var nextP = llmClone();
+      nextP.providers = nextP.providers.filter(function (p) { return p.id !== pid; });
+      llmSave(nextP);
+      return;
+    }
+    var saveProvider = target.closest('[data-llm-save-provider]');
+    if (saveProvider) { llmSaveProvider(); return; }
+
+    var addMcp = target.closest('[data-llm-add-mcp]');
+    if (addMcp) { LLM.form = { kind: 'mcp', id: null }; renderLlmPage(); return; }
+    var editMcp = target.closest('[data-llm-edit-mcp]');
+    if (editMcp) {
+      LLM.form = { kind: 'mcp', id: editMcp.getAttribute('data-llm-edit-mcp') };
+      renderLlmPage();
+      return;
+    }
+    var delMcp = target.closest('[data-llm-del-mcp]');
+    if (delMcp) {
+      var mid = delMcp.getAttribute('data-llm-del-mcp');
+      var nextM = llmClone();
+      nextM.mcp = nextM.mcp.filter(function (s) { return s.id !== mid; });
+      llmSave(nextM);
+      return;
+    }
+    var saveMcp = target.closest('[data-llm-save-mcp]');
+    if (saveMcp) { llmSaveMcp(); return; }
+    var mcpToggle = target.closest('[data-llm-mcp-toggle]');
+    if (mcpToggle) {
+      var mtid = mcpToggle.getAttribute('data-llm-mcp-toggle');
+      var nextT = llmClone();
+      nextT.mcp = nextT.mcp.map(function (s) {
+        return s.id === mtid ? Object.assign({}, s, { enabled: !s.enabled }) : s;
+      });
+      llmSave(nextT);
+      return;
+    }
+    var cancelForm = target.closest('[data-llm-cancel-form]');
+    if (cancelForm) { LLM.form = null; renderLlmPage(); return; }
+
+    var saveKeys = target.closest('[data-llm-save-keys]');
+    if (saveKeys) { llmSaveKeys(); return; }
+    var fetchModels = target.closest('[data-llm-fetch-models]');
+    if (fetchModels) { llmFetchModels(); return; }
+    var saveDefaults = target.closest('[data-llm-save-defaults]');
+    if (saveDefaults) { llmSaveDefaults(); return; }
+
+    var providerOpt = target.closest('[data-llm-provider-opt]');
+    if (providerOpt) {
+      llmSyncDefaultsFromDom();
+      LLM.defaults.provider = providerOpt.getAttribute('data-llm-provider-opt');
+      LLM.models = null;
+      renderLlmPage();
+      return;
+    }
+    var modelOpt = target.closest('[data-llm-model-opt]');
+    if (modelOpt) {
+      llmSyncDefaultsFromDom();
+      LLM.defaults.model = modelOpt.getAttribute('data-llm-model-opt');
+      renderLlmPage();
+      return;
+    }
+    var thinkingOpt = target.closest('[data-llm-thinking-opt]');
+    if (thinkingOpt) {
+      llmSyncDefaultsFromDom();
+      LLM.defaults.thinking = thinkingOpt.getAttribute('data-llm-thinking-opt');
+      renderLlmPage();
       return;
     }
   });
