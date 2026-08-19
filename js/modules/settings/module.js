@@ -1284,6 +1284,7 @@
 
   function llmMcpFormHtml(t, s) {
     var protocol = s.protocol || 'https';
+    var enabled = s.enabled !== false;
     var hdrs = {};
     var h = s.headers && typeof s.headers === 'object' ? s.headers : {};
     Object.keys(h).forEach(function (k) {
@@ -1303,28 +1304,52 @@
     }).join('');
     return (
       '<div class="sp-llm-form">' +
-      '<input class="sp-input" data-llm-f-name placeholder="' + t('llm.name') + '" value="' + escLlm(s.name) + '">' +
-      '<div class="sp-llm-form-row">' +
-      '<input class="sp-input" data-llm-f-protocol placeholder="https / sse" value="' + escLlm(protocol) + '">' +
-      '<input class="sp-input" data-llm-f-url placeholder="' + t('llm.url') + ' (https://…/mcp)" value="' + escLlm(s.url) + '">' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.name') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-name placeholder="context7" value="' + escLlm(s.name) + '">' +
       '</div>' +
-      '<input type="password" class="sp-input" data-llm-f-apikey placeholder="' + t('llm.mcpApiKey') + '" value="' + escLlm(s.apiKey || '') + '" autocomplete="off">' +
-      '<input class="sp-input" data-llm-f-authheader placeholder="' + t('llm.mcpAuthHeader') + '" value="' + escLlm(s.authHeader || '') + '">' +
-      '<div class="sp-llm-form-label">' + t('llm.customHeaders') + '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.protocol') + '</span></div>' +
+      '<div class="sp-llm-proto-row">' +
+      '<button type="button" class="sp-llm-proto" data-llm-f-protocol="https"><span class="sp-llm-proto-val">Streamable HTTP</span>' + (protocol !== 'sse' ? '<span class="sp-llm-proto-check">' + icon().iconSvg('check', { class: 'size-3' }) + '</span>' : '') + '</button>' +
+      '<button type="button" class="sp-llm-proto" data-llm-f-protocol="sse"><span class="sp-llm-proto-val">SSE (HTTP+SSE)</span>' + (protocol === 'sse' ? '<span class="sp-llm-proto-check">' + icon().iconSvg('check', { class: 'size-3' }) + '</span>' : '') + '</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.url') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-url placeholder="https://…/mcp" value="' + escLlm(s.url) + '">' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.mcpApiKeyLabel') + '</span></div>' +
+      '<input type="password" class="sp-input" data-llm-f-apikey placeholder="' + t('llm.mcpApiKeyEmpty') + '" value="' + escLlm(s.apiKey || '') + '" autocomplete="off">' +
+      '<div class="sp-llm-field-desc">' + t('llm.mcpApiKeyHint') + '</div>' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.authHeader') + '</span></div>' +
+      '<input class="sp-input" data-llm-f-authheader placeholder="Authorization" value="' + escLlm(s.authHeader || '') + '">' +
+      '<div class="sp-llm-field-desc">' + t('llm.authHeaderHint') + '</div>' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.customHeaders') + '</span></div>' +
       '<div class="sp-llm-hdrs">' + hdrRows +
       '<button type="button" class="sp-llm-btn" data-llm-add-hdr>' + icon().iconSvg('plus', { class: 'size-4' }) + t('llm.addHeader') + '</button>' +
       '</div>' +
-      '<div class="sp-llm-form-row">' +
-      '<input type="number" class="sp-input" data-llm-f-sort placeholder="' + t('llm.sort') + '" value="' + escLlm(s.sort || 0) + '">' +
-      '<label class="sp-llm-form-switch"><span role="switch" aria-checked="' + (s.enabled !== false) + '" class="sp-switch' + (s.enabled !== false ? ' is-on' : '') + '" data-llm-f-enabled></span>' + t('llm.enableServer') + '</label>' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.sort') + '</span></div>' +
+      '<input type="number" class="sp-input" data-llm-f-sort placeholder="0" value="' + escLlm(s.sort || 0) + '">' +
+      '</div>' +
+      '<div class="sp-llm-field">' +
+      '<div class="sp-llm-field-label"><span>' + t('llm.enableServer') + '</span></div>' +
+      '<span role="switch" aria-checked="' + enabled + '" class="sp-switch' + (enabled ? ' is-on' : '') + '" data-llm-f-enabled></span>' +
       '</div>' +
       '<div class="sp-llm-form-actions">' +
       '<button type="button" data-llm-save-mcp class="sp-llm-btn is-primary">' + t('llm.save') + '</button>' +
       '<button type="button" data-llm-cancel-form class="sp-llm-btn">' + t('llm.cancel') + '</button>' +
-      '</div></div>'
+      '</div>' +
+      '</div>'
     );
   }
-
   /* ---------- 联网搜索 ---------- */
   function llmSearchHtml(t) {
     var search = LLM.search || {};
@@ -1701,7 +1726,7 @@
   function llmSaveMcp() {
     var name = llmField('name').trim();
     var url = llmField('url').trim();
-    var protocol = (llmField('protocol').trim() || 'https').toLowerCase();
+    var protocol = String((LLM.form && LLM.form.protocol) || llmField('protocol') || 'https').toLowerCase();
     if (!url) {
       App.ui.toast('URL 必填', 'error');
       return;
@@ -1794,6 +1819,12 @@
     }
     var saveMcp = target.closest('[data-llm-save-mcp]');
     if (saveMcp) { llmSaveMcp(); return; }
+    var protoBtn = target.closest('[data-llm-f-protocol]');
+    if (protoBtn) {
+      if (LLM.form) LLM.form.protocol = protoBtn.getAttribute('data-llm-f-protocol');
+      renderLlmPage();
+      return;
+    }
     if (target.closest('[data-llm-f-enabled]')) {
       if (LLM.form) LLM.form.enabled = LLM.form.enabled === false;
       renderLlmPage();
