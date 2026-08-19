@@ -1030,12 +1030,9 @@
         llmSelectHtml(llmProviderName(provider),
           llmAllProviders().map(function (p) { return llmOptItem('provider:' + p.id, p.name, p.id === provider); }).join(''))) +
       field('llm.model',
-        '<div class="sp-llm-modelrow">' +
-        '<input class="sp-input" data-llm-field="model" value="' + escLlm(model) + '" placeholder="' + t('llm.model') + '">' +
-        '<div style="min-width:10rem">' +
-        llmSelectHtml(model || t('llm.chooseModel'),
+        '<div class="sp-llm-comborow">' +
+        llmComboHtml('model', model, t('llm.model'),
           (fetched.length ? modelOpts : '<div class="sp-llm-dd-empty">' + t('llm.fetchModelsHint') + '</div>')) +
-        '</div>' +
         '<button type="button" data-llm-fetch-models="' + escLlm(provider) + '" class="sp-llm-btn"' + (LLM.fetching[provider] ? ' disabled' : '') + '>' +
         (LLM.fetching[provider] ? t('llm.fetching') : t('llm.fetchModels')) + '</button>' +
         '</div>') +
@@ -1048,11 +1045,8 @@
         '0(聚焦) — 1(全采样)',
         { param: 'topP', text: Number(topP).toFixed(2) }) +
       field('llm.maxTokens',
-        '<div class="sp-llm-modelrow">' +
-        '<input class="sp-input" data-llm-field="maxTokens" value="' + escLlm(llmFormatTokens(maxTokens)) + '" placeholder="如 8k / 0.5M">' +
-        llmSelectHtml(llmFormatTokens(maxTokens),
+        llmComboHtml('maxTokens', llmFormatTokens(maxTokens), '如 8k / 0.5M',
           maxPresets.map(function (m) { return llmOptItem('maxtokens:' + m[0], m[1], Number(maxTokens) === m[0]); }).join('')) +
-        '</div>' +
         '<p class="sp-field-desc">' + t('llm.maxTokensHint') + '</p>') +
       field('llm.thinking',
         llmSelectHtml(thinking,
@@ -1123,6 +1117,21 @@
       '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
       '</button>' +
       '<div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-44') + '">' + menuHtml + '</div>' +
+      '</div>'
+    );
+  }
+
+  /* 输入框+下拉组合框(单一控件:左侧可编辑输入 + 右侧下拉箭头) */
+  function llmComboHtml(fieldName, value, placeholder, menuHtml) {
+    return (
+      '<div class="relative" data-dropdown>' +
+      '<div class="sp-llm-combo">' +
+      '<input class="sp-llm-combo-input" data-llm-field="' + fieldName + '" value="' + escLlm(value) + '" placeholder="' + escLlm(placeholder) + '" autocomplete="off">' +
+      '<button type="button" data-dropdown-trigger class="sp-llm-combo-btn" aria-haspopup="listbox" tabindex="-1">' +
+      '<svg class="sp-select-chevron" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>' +
+      '</button>' +
+      '</div>' +
+      '<div role="listbox" data-dropdown-menu class="' + App.ui.dropdownContentClass('sp-select-menu min-w-48') + '">' + menuHtml + '</div>' +
       '</div>'
     );
   }

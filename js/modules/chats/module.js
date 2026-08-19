@@ -1569,14 +1569,15 @@
       sliderField(L('chats.topP', 'Top P'), 'topP', 0, 1, 0.01, p.topP, function (v) { return Number(v).toFixed(2); }) +
       sliderField(L('chats.topK', 'Top K'), 'topK', 0, 100, 1, p.topK, function (v) { return String(Math.round(v)); }) +
       fieldHtml(L('chats.maxTokens', 'Max tokens'),
-        '<div class="chat-select-row">' +
-        '<input type="text" class="chat-input" value="' + escAttr(formatMaxTokens(p.maxTokens)) + '" data-chat-maxtokens>' +
-        ddMenu('maxtokens', formatMaxTokens(p.maxTokens),
-          '<div class="chat-dd-label">常用值</div>' +
-          [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 393216, 524288, 1048576, 2097152].map(function (v) {
-            return ddItem('maxtokens', String(v), formatMaxTokens(v), false);
-          }).join('')
-        ) +
+        '<div class="chat-dd chat-combo" data-chat-dd-wrap>' +
+        '<input type="text" class="chat-combo-input" value="' + escAttr(formatMaxTokens(p.maxTokens)) + '" data-chat-maxtokens placeholder="' + L('chats.maxTokens', 'Max tokens') + '">' +
+        '<button type="button" class="chat-combo-btn" data-chat-dd-trigger="maxtokens" aria-label="presets" tabindex="-1">' + icon('chevron-down', 'size-3') + '</button>' +
+        '<div class="chat-dd-menu" data-chat-dd-menu="maxtokens">' +
+        '<div class="chat-dd-label">常用值</div>' +
+        [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 393216, 524288, 1048576, 2097152].map(function (v) {
+          return ddItem('maxtokens', String(v), formatMaxTokens(v), false);
+        }).join('') +
+        '</div>' +
         '</div>'
       ) +
       fieldHtml(L('chats.prompt', 'Prompt'),

@@ -634,6 +634,49 @@
 
 /* ---------- 下拉菜单(chat 作用域) ---------- */
 .chat-dd { position: relative; display: inline-flex; }
+/* 输入框+下拉组合框(单一控件,类 shadcn Combobox) */
+.chat-combo {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--input);
+  border-radius: 0.5rem;
+  background: var(--background);
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.chat-combo:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 35%, transparent);
+}
+.chat-combo-input {
+  flex: 1;
+  min-width: 0;
+  height: 2.25rem;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  padding: 0 0.625rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+}
+.chat-combo-input::placeholder { color: var(--muted-foreground); }
+.chat-combo-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2.25rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.chat-combo-btn:hover { color: var(--foreground); }
 .chat-dd-menu {
   display: none; position: absolute; z-index: 60; min-width: 14rem; max-width: 20rem;
   padding: 0.25rem; border: 1px solid var(--border); border-radius: 0.625rem;
