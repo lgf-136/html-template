@@ -164,7 +164,6 @@
     dialog: null,
     ctx: null, // { id, x, y }
     dragSlider: null,
-    depthDrag: false,
   };
 
   function defaults() {
@@ -1336,8 +1335,8 @@
       '<div class="chat-composer-left">' +
       composerDd('provider', provider ? esc(provider.name) : L('chats.selectProvider', 'Provider'), composerProviderMenu(active)) +
       composerDd('model', active.model ? esc(active.model) : L('chats.selectModel', 'Model'), composerModelMenu(active, models)) +
-      '<button type="button" class="chat-composer-btn' + (thinkingOn(active) ? ' is-on' : '') + '" data-chat-toggle="thinking" data-tip="' + L('chats.thinkingLabel', 'Thinking') + '">' + icon('brain') + '</button>' +
       thinkingDepthHtml(active) +
+      '<button type="button" class="chat-composer-btn' + (thinkingOn(active) ? ' is-on' : '') + '" data-chat-toggle="thinking" data-tip="' + L('chats.thinkingLabel', 'Thinking') + '">' + icon('brain') + '</button>' +
       mcpComposerHtml(active) +
       '</div>' +
       '<div class="chat-composer-right">' +
@@ -1373,17 +1372,18 @@
   }
 
   var THINK_LEVELS = ['low', 'medium', 'high', 'max'];
+  function thinkLevelLabel(level) {
+    var map = { low: '低', medium: '中', high: '高', max: '最高' };
+    var en = { low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
+    return map[level] || en[level] || level;
+  }
   function thinkingDepthHtml(active) {
     if (!thinkingOn(active)) return '';
     var cur = active.thinking || 'medium';
-    var idx = Math.max(0, THINK_LEVELS.indexOf(cur));
-    var pct = Math.round((idx / (THINK_LEVELS.length - 1)) * 100);
-    return (
-      '<div class="chat-depth" data-chat-depth data-value="' + idx + '" data-tip="' + L('chats.thinkingDepth', 'Thinking depth') + ': ' + cur + '">' +
-      '<div class="chat-slider-track"><div class="chat-slider-fill" style="width:' + pct + '%"></div></div>' +
-      '<div class="chat-slider-thumb" style="left:' + pct + '%"></div>' +
-      '</div>'
-    );
+    var items = THINK_LEVELS.map(function (lv) {
+      return ddItem('depth', lv, thinkLevelLabel(lv), lv === cur);
+    }).join('');
+    return composerDd('depth', thinkLevelLabel(cur), items);
   }
 
   function composerDd(kind, label, menuHtml) {
@@ -1579,7 +1579,9 @@
         ddMenu('prompt', curPrompt ? curPrompt.name : '默认',
           '<button type="button" class="chat-dd-item' + (!a.promptId ? ' is-active' : '') + '" data-chat-set-prompt="">' + icon('message-square') + '<span>默认(无系统提示)</span>' + (!a.promptId ? '<span class="chat-dd-check">' + icon('check') + '</span>' : '') + '</button>' +
           prompts.map(function (pr) { return ddItem('prompt', pr.id, pr.name, a.promptId === pr.id); }).join('') +
-          '<button type="button" class="chat-dd-item" data-chat-add-prompt>' + icon('plus') + '<span>' + L('chats.newPrompt', 'New prompt') + '</span></button>'
+          '<div class="chat-dd-sep"></div>' +
+          '<button type="button" class="chat-dd-item" data-chat-add-prompt>' + icon('plus') + '<span>' + L('chats.newPrompt', 'New prompt') + '</span></button>' +
+          '<button type="button" class="chat-dd-item" data-chat-manage-prompts>' + icon('list') + '<span>' + L('chats.managePrompts', 'Manage prompts') + '</span></button>'
         ) +
         '<div style="margin-top:0.375rem;font-size:0.6875rem;color:var(--muted-foreground)">' +
         (curPrompt ? esc(curPrompt.content.slice(0, 90)) + (curPrompt.content.length > 90 ? '…' : '') : '') +
@@ -1683,6 +1685,7 @@
     var d = state.dialog;
     var title = '';
     var body = '';
+    var footExtra = '';
     if (d.kind === 'provider') {
       title = d.id ? '编辑供应商' : L('chats.customProvider', 'Custom provider');
       body =
@@ -1706,6 +1709,22 @@
       body =
         fieldHtml(L('chats.name', 'Name'), '<input type="text" class="chat-input" data-dlg-field="name" value="' + escAttr(d.name || '') + '" placeholder="React 工程师">') +
         fieldHtml(L('chats.content', 'Content'), '<textarea class="chat-textarea" data-dlg-field="content" placeholder="系统提示词…">' + esc(d.content || '') + '</textarea>');
+    } else if (d.kind === 'prompt-manage') {
+      title = L('chats.managePrompts', 'Manage prompts');
+      var pmList = (state.config.prompts || []).map(function (p) {
+        return (
+          '<div class="chat-pm-row">' +
+          '<div class="chat-pm-main"><div class="chat-pm-name">' + esc(p.name || p.id) + '</div>' +
+          '<div class="chat-pm-desc">' + esc((p.content || '').slice(0, 80)) + '</div></div>' +
+          '<div class="chat-pm-acts">' +
+          '<button type="button" class="chat-btn" data-prompt-mgmt-edit="' + escAttr(p.id) + '">' + icon('pencil', 'size-3') + L('chats.edit', 'Edit') + '</button>' +
+          '<button type="button" class="chat-btn is-danger" data-prompt-mgmt-del="' + escAttr(p.id) + '">' + icon('trash', 'size-3') + L('chats.delete', 'Delete') + '</button>' +
+          '</div></div>'
+        );
+      }).join('');
+      body = pmList || '<p class="sp-field-desc" style="color:var(--muted-foreground)">' + L('chats.noPrompts', 'No prompts yet') + '</p>';
+      footExtra =
+        '<button type="button" class="chat-btn is-primary" data-prompt-mgmt-new>' + icon('plus', 'size-3') + L('chats.newPrompt', 'New prompt') + '</button>';
     } else if (d.kind === 'group') {
       title = d.id ? '编辑分组' : L('chats.newGroup', 'New group');
       body =
@@ -1735,8 +1754,9 @@
       '<div class="chat-dialog-head"><h2>' + esc(title) + '</h2><button type="button" class="chat-composer-btn" data-chat-dlg-close>' + icon('x') + '</button></div>' +
       '<div class="chat-dialog-body">' + body + '</div>' +
       '<div class="chat-dialog-foot">' +
+      (footExtra || '') +
       '<button type="button" class="chat-btn" data-chat-dlg-close>' + L('chats.cancel', 'Cancel') + '</button>' +
-      '<button type="button" class="chat-btn is-primary" data-chat-dlg-save>' + (d.kind === 'confirm' ? (d.confirmLabel || L('chats.delete', 'Delete')) : L('chats.save', 'Save')) + '</button>' +
+      (d.kind === 'prompt-manage' ? '' : '<button type="button" class="chat-btn is-primary" data-chat-dlg-save>' + (d.kind === 'confirm' ? (d.confirmLabel || L('chats.delete', 'Delete')) : L('chats.save', 'Save')) + '</button>') +
       '</div>' +
       '</div>' +
       '</div>'
@@ -2073,7 +2093,16 @@
    * 下拉 / 弹层控制
    * ============================================================ */
   function closeDds() {
-    document.querySelectorAll('.chat-dd-menu.is-open').forEach(function (m) { m.classList.remove('is-open'); });
+    document.querySelectorAll('.chat-dd-menu.is-open').forEach(function (m) {
+      m.classList.remove('is-open');
+      if (m.style.position === 'fixed') {
+        m.style.position = '';
+        m.style.left = '';
+        m.style.top = '';
+        m.style.bottom = '';
+        m.style.width = '';
+      }
+    });
   }
   function toggleDd(trigger) {
     var wrap = trigger.closest('.chat-dd');
@@ -2084,8 +2113,25 @@
     closeDds();
     if (wasOpen) return;
     menu.classList.add('is-open');
-    // 底部空间不足时向上弹出
     var rect = wrap.getBoundingClientRect();
+    // 右侧面板(滚动容器)内的菜单用 fixed 定位,避免被 overflow 裁剪;
+    // 其余(输入框等)保持绝对定位 + 向上弹出
+    if (wrap.closest('.chat-right')) {
+      var estH = Math.min(menu.scrollHeight || 320, 320);
+      menu.style.position = 'fixed';
+      menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 330)) + 'px';
+      menu.style.width = Math.min(Math.max(rect.width, 240), 320) + 'px';
+      menu.style.marginTop = '0';
+      menu.style.marginBottom = '0';
+      if (rect.bottom + estH > window.innerHeight - 8 && rect.top > estH) {
+        menu.style.top = 'auto';
+        menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+      } else {
+        menu.style.top = (rect.bottom + 4) + 'px';
+        menu.style.bottom = 'auto';
+      }
+      return;
+    }
     if (rect.bottom > window.innerHeight * 0.6) {
       menu.style.bottom = '100%';
       menu.style.top = 'auto';
@@ -2269,6 +2315,13 @@
       rerender();
       return;
     }
+    var setDepth = target.closest('[data-chat-set-depth]');
+    if (setDepth) {
+      setActiveParam('thinking', setDepth.getAttribute('data-chat-set-depth'));
+      closeDds();
+      rerender();
+      return;
+    }
 
     // 开关
     var toggle = target.closest('[data-chat-toggle]');
@@ -2424,6 +2477,32 @@
     if (target.closest('[data-chat-add-prompt]')) {
       closeDds();
       openDialog('prompt', {});
+      return;
+    }
+    var managePrompts = target.closest('[data-chat-manage-prompts]');
+    if (managePrompts) {
+      closeDds();
+      openDialog('prompt-manage', {});
+      return;
+    }
+    if (target.closest('[data-prompt-mgmt-new]')) {
+      openDialog('prompt', {});
+      return;
+    }
+    var pmEdit = target.closest('[data-prompt-mgmt-edit]');
+    if (pmEdit) {
+      var pme = (state.config.prompts || []).filter(function (p) { return p.id === pmEdit.getAttribute('data-prompt-mgmt-edit'); })[0];
+      if (pme) openDialog('prompt', Object.assign({}, pme));
+      return;
+    }
+    var pmDel = target.closest('[data-prompt-mgmt-del]');
+    if (pmDel) {
+      var pmdId = pmDel.getAttribute('data-prompt-mgmt-del');
+      state.config.prompts = (state.config.prompts || []).filter(function (p) { return p.id !== pmdId; });
+      if (state.active.promptId === pmdId) setActiveParam('promptId', '');
+      persistConfig();
+      App.ui.toast(L('chats.deleted', 'Deleted'));
+      openDialog('prompt-manage', {});
       return;
     }
     var promptEdit = target.closest('[data-chat-prompt-edit]');
@@ -2774,40 +2853,6 @@
       });
     });
   });
-
-  /* ---------- 思考深度滑块(自定义,替代原生 range) ---------- */
-  document.addEventListener('pointerdown', function (e) {
-    var dp = e.target.closest ? e.target.closest('[data-chat-depth]') : null;
-    if (!dp) return;
-    e.preventDefault();
-    e.stopPropagation();
-    state.depthDrag = true;
-    depthFromEvent(dp, e);
-  });
-  document.addEventListener('pointermove', function (e) {
-    if (!state.depthDrag) return;
-    var dp = document.querySelector('[data-chat-depth]');
-    if (dp) depthFromEvent(dp, e);
-  });
-  document.addEventListener('pointerup', function () {
-    state.depthDrag = false;
-  });
-  function depthFromEvent(dp, e) {
-    var track = dp.querySelector('.chat-slider-track');
-    if (!track) return;
-    var rect = track.getBoundingClientRect();
-    var ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    var idx = Math.round(ratio * (THINK_LEVELS.length - 1));
-    var level = THINK_LEVELS[idx];
-    if (state.active) state.active.thinking = level;
-    setActiveParam('thinking', level);
-    dp.setAttribute('data-value', idx);
-    var pct = Math.round((idx / (THINK_LEVELS.length - 1)) * 100);
-    var fill = dp.querySelector('.chat-slider-fill');
-    var thumb = dp.querySelector('.chat-slider-thumb');
-    if (fill) fill.style.width = pct + '%';
-    if (thumb) thumb.style.left = pct + '%';
-  }
 
   /* ---------- 自定义滑块(替代原生 range) ---------- */
   document.addEventListener('pointerdown', function (e) {

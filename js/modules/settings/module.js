@@ -1022,9 +1022,11 @@
       return llmOptItem('model:' + m, m, m === model);
     }).join('');
 
-    function field(labelKey, inner, desc) {
+    function field(labelKey, inner, desc, valText) {
       return (
-        '<div class="sp-field"><label class="sp-label">' + t(labelKey) + '</label>' + inner +
+        '<div class="sp-field"><label class="sp-label">' + t(labelKey) +
+        (valText ? '<span class="sp-label-val" data-sp-label-val="' + escLlm(valText.param) + '">' + escLlm(valText.text) + '</span>' : '') +
+        '</label>' + inner +
         (desc ? '<p class="sp-field-desc">' + desc + '</p>' : '') + '</div>'
       );
     }
@@ -1042,10 +1044,12 @@
         (fetched.length ? '<div class="sp-llm-modelrow" style="margin-top:0.375rem">' + llmSelectHtml(t('llm.chooseModel'), modelOpts) + '</div>' : '')) +
       field('llm.temperature',
         spSliderHtml('temperature', 0, 2, 0.05, temp),
-        '0(严谨) — 2(创意)') +
+        '0(严谨) — 2(创意)',
+        { param: 'temperature', text: Number(temp).toFixed(2) }) +
       field('llm.topP',
         spSliderHtml('topP', 0, 1, 0.01, topP),
-        '0(聚焦) — 1(全采样)') +
+        '0(聚焦) — 1(全采样)',
+        { param: 'topP', text: Number(topP).toFixed(2) }) +
       field('llm.maxTokens',
         '<div class="sp-llm-modelrow">' +
         '<input class="sp-input" data-llm-field="maxTokens" value="' + escLlm(llmFormatTokens(maxTokens)) + '" placeholder="如 8k / 0.5M">' +
@@ -1084,7 +1088,6 @@
       '<div class="sp-slider-track"><div class="sp-slider-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="sp-slider-thumb" style="left:' + pct + '%"></div>' +
       '</div>' +
-      '<span class="sp-slider-val" data-sp-slider-val="' + param + '">' + Number(value).toFixed(2) + '</span>' +
       '</div>'
     );
   }
@@ -1103,7 +1106,7 @@
     var thumb = sl.querySelector('.sp-slider-thumb');
     if (fill) fill.style.width = pct + '%';
     if (thumb) thumb.style.left = pct + '%';
-    var num = document.querySelector('[data-sp-slider-val="' + d.param + '"]');
+    var num = document.querySelector('[data-sp-label-val="' + d.param + '"]');
     if (num) num.textContent = Number(val).toFixed(2);
     if (!LLM.defaults.params) LLM.defaults.params = {};
     LLM.defaults.params[d.param] = val;
