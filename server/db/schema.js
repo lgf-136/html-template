@@ -61,6 +61,38 @@ CREATE TABLE IF NOT EXISTS apihub_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_apihub_logs_ws ON apihub_logs (workspace_id, ts);`;
 
+/* ---------- 聊天模块业务数据表(工作空间隔离) ---------- */
+
+/** 聊天配置表:每个工作空间一行;config(分组/标签/参数/联网/供应商元数据/提示词/MCP)明文,secrets(供应商 API Key)加密落库 */
+const CHAT_CONFIG_TABLE = `
+CREATE TABLE IF NOT EXISTS chat_config (
+  workspace_id TEXT PRIMARY KEY,
+  config       TEXT NOT NULL,
+  secrets      TEXT NOT NULL,
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);`;
+
+/** 聊天会话表:一行一个会话,消息以 JSON 数组内嵌(messages 列),按工作空间隔离 */
+const CHAT_CONVERSATIONS_TABLE = `
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  group_id     TEXT NOT NULL DEFAULT '',
+  tag_ids      TEXT NOT NULL DEFAULT '[]',
+  favorite     INTEGER NOT NULL DEFAULT 0,
+  pinned       INTEGER NOT NULL DEFAULT 0,
+  archived     INTEGER NOT NULL DEFAULT 0,
+  provider     TEXT NOT NULL DEFAULT '',
+  model        TEXT NOT NULL DEFAULT '',
+  prompt_id    TEXT NOT NULL DEFAULT '',
+  params       TEXT NOT NULL DEFAULT '{}',
+  messages     TEXT NOT NULL DEFAULT '[]',
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_convs_ws ON chat_conversations (workspace_id, updated_at);`;
+
 const SCHEMA =
   APP_SETTINGS_TABLE +
   `
@@ -72,7 +104,9 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );` +
   APIHUB_CONFIG_TABLE +
   APIHUB_HISTORY_TABLE +
-  APIHUB_LOGS_TABLE;
+  APIHUB_LOGS_TABLE +
+  CHAT_CONFIG_TABLE +
+  CHAT_CONVERSATIONS_TABLE;
 
 /** 旧版 app_settings(key 单主键,无 workspace_id)→ 新版(复合主键)迁移步骤 */
 const APP_SETTINGS_MIGRATION_SQL = [
@@ -110,6 +144,8 @@ module.exports = {
   APIHUB_CONFIG_TABLE,
   APIHUB_HISTORY_TABLE,
   APIHUB_LOGS_TABLE,
+  CHAT_CONFIG_TABLE,
+  CHAT_CONVERSATIONS_TABLE,
   APP_SETTINGS_MIGRATION_SQL,
   hasWorkspaceColumn,
   migrateAppSettings,

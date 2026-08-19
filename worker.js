@@ -40,6 +40,7 @@ import { encryptWithKey, decryptWithKey } from './server/security/core.js';
 import { createThrottle } from './server/auth/throttle.js';
 import { SECURITY_HEADERS } from './server/http/headers.js';
 import { createHub } from './server/hub/index.js';
+import { createChat } from './server/chat/index.js';
 
 /* ---------- 登录限流(仅统计密码错误次数;与 Node 路由共用 server/auth/throttle.js) ---------- */
 const loginThrottle = createThrottle();
@@ -141,6 +142,14 @@ function matchStaticRoute(method, pathname) {
     { key: 'GET /api/hub/state', kind: 'hubState', mgmt: true },
     { key: 'PUT /api/hub/config', kind: 'hubConfig', mgmt: true },
     { key: 'PUT /api/hub/history', kind: 'hubHistory', mgmt: true },
+    { key: 'GET /api/chat/state', kind: 'chatState' },
+    { key: 'PUT /api/chat/config', kind: 'chatConfig' },
+    { key: 'GET /api/chat/conversations', kind: 'chatGetConversations' },
+    { key: 'POST /api/chat/conversations', kind: 'chatPostConversation' },
+    { key: 'PUT /api/chat/conversations', kind: 'chatPutConversation' },
+    { key: 'DELETE /api/chat/conversations', kind: 'chatDeleteConversations' },
+    { key: 'POST /api/chat/models', kind: 'chatModels' },
+    { key: 'POST /api/chat/stream', kind: 'chatStream' },
   ];
   for (const r of table) {
     if (r.key === key) return r;
@@ -201,6 +210,12 @@ async function handleApi(request, env, pathname) {
     verifyPassword: (p) => verifyEnvPassword(p, env),
     matchesPassword,
   });
+  const chat = createChat({
+    db,
+    encrypt: (v) => encrypt(v, env),
+    decrypt: (v) => decrypt(v, env),
+    fetchImpl: typeof fetch === 'function' ? fetch : null,
+  });
   const state = await hub.loadAll();
   const staticMeta = matchStaticRoute(method, pathname);
   const custom = staticMeta
@@ -243,6 +258,14 @@ async function handleApi(request, env, pathname) {
       'GET /api/settings',
       'PUT /api/settings',
       'DELETE /api/settings',
+      'GET /api/chat/state',
+      'PUT /api/chat/config',
+      'GET /api/chat/conversations',
+      'POST /api/chat/conversations',
+      'PUT /api/chat/conversations',
+      'DELETE /api/chat/conversations',
+      'POST /api/chat/models',
+      'POST /api/chat/stream',
     ]) {
       const m = matchStaticRoute(...r.split(' '));
       const [, p] = r.split(' ');
@@ -393,6 +416,102 @@ async function handleApi(request, env, pathname) {
       ]);
     }
     return sendJson(200, { ok: true, removed: keys.length });
+  }
+
+  /* ---------- 聊天模块(配置/会话/模型/流式补全,与 Node 端共用 server/chat/index.js) ---------- */
+  if (staticMeta.kind === 'chatState') {
+    const loaded = await chat.loadAll();
+    return sendJson(200, {
+      config: loaded.config,
+      secrets: loaded.secrets,
+      conversations: await chat.listConversations(),
+    });
+  }
+  if (staticMeta.kind === 'chatConfig') {
+    const body = await readJson(request);
+    try {
+      const saved = await chat.saveAll(body || {});
+      return sendJson(200, { ok: true, config: saved.config, secrets: saved.secrets });
+    } catch (e) {
+      return sendJson(400, { error: 'bad_config', message: String((e && e.message) || e) });
+    }
+  }
+  if (staticMeta.kind === 'chatGetConversations') {
+    const url = new URL(request.url);
+    const id = url.searchParams.get('id') || '';
+    if (id) return sendJson(200, { conversation: await chat.getConversation(id) });
+    return sendJson(200, { conversations: await chat.listConversations() });
+  }
+  if (staticMeta.kind === 'chatPostConversation' || staticMeta.kind === 'chatPutConversation') {
+    const body = await readJson(request);
+    try {
+      const conversation = await chat.upsertConversation(body && body.conversation);
+      return sendJson(200, { conversation });
+    } catch (e) {
+      return sendJson(400, { error: 'bad_conversation', message: String((e && e.message) || e) });
+    }
+  }
+  if (staticMeta.kind === 'chatDeleteConversations') {
+    const body = await readJson(request);
+    try {
+      const result = await chat.deleteConversations(body && body.ids);
+      return sendJson(200, { ok: true, removed: result.removed });
+    } catch (e) {
+      return sendJson(400, { error: 'bad_request', message: String((e && e.message) || e) });
+    }
+  }
+  if (staticMeta.kind === 'chatModels') {
+    const body = await readJson(request);
+    try {
+      const loaded = await chat.loadAll();
+      const apiKey =
+        body && typeof body.apiKey === 'string'
+          ? body.apiKey
+          : (loaded.secrets.providerKeys && loaded.secrets.providerKeys[body && body.providerId]) || '';
+      const result = await chat.listModels(body && body.providerId, apiKey);
+      return sendJson(200, { models: result.models });
+    } catch (e) {
+      return sendJson(400, { error: 'models_failed', message: String((e && e.message) || e) });
+    }
+  }
+  if (staticMeta.kind === 'chatStream') {
+    const body = await readJson(request);
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const enqueue = (obj) => {
+          try {
+            controller.enqueue(encoder.encode('data: ' + JSON.stringify(obj) + '\n\n'));
+          } catch (e) {
+            /* 已关闭 */
+          }
+        };
+        try {
+          await chat.streamChat(body || {}, {
+            signal: request.signal || null,
+            isAborted: () => request.signal ? request.signal.aborted : false,
+            onEvent: enqueue,
+          });
+        } catch (e) {
+          enqueue({ type: 'error', message: String((e && e.message) || e) });
+        } finally {
+          try {
+            controller.close();
+          } catch (e) {
+            /* 已关闭 */
+          }
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: Object.assign(
+        {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+        },
+        SECURITY_HEADERS
+      ),
+    });
   }
 
   return sendJson(404, { error: 'not_found' });

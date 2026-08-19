@@ -33,9 +33,11 @@
 
 const { sendJson } = require('../http/json');
 const { createHub } = require('../hub');
+const { createChat } = require('../chat');
 const authRoutes = require('./routes/auth');
 const settingsRoutes = require('./routes/settings');
 const hubRoutes = require('./routes/hub');
+const chatRoutes = require('./routes/chat');
 
 /** 去除尾部多余斜杠,保证路由表按规范路径命中 */
 function normalizePath(pathname) {
@@ -48,11 +50,13 @@ function normalizePath(pathname) {
  */
 function createApiHandler(ctx) {
   const hub = createHub(ctx);
+  const chat = createChat(ctx);
 
   // 内置路由表(静态);hub 自定义路由在请求时按配置动态解析
   const allRoutes = authRoutes(ctx)
     .concat(settingsRoutes(ctx))
-    .concat(hubRoutes(Object.assign({}, ctx, { hub })));
+    .concat(hubRoutes(Object.assign({}, ctx, { hub })))
+    .concat(chatRoutes(Object.assign({}, ctx, { chat })));
   const routes = {};
   allRoutes.forEach(function (r) {
     routes[r.method + ' ' + r.path] = r;

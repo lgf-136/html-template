@@ -10,7 +10,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test test/*.test.js test/docs/*.test.js test/settings/*.test.js test/hub/*.test.js",
+    "test": "node --test test/*.test.js test/docs/*.test.js test/settings/*.test.js test/hub/*.test.js test/chat/*.test.js",
     "deploy": "wrangler deploy",
     "deploy:vercel": "vercel --prod",
     "deploy:deno": "deno deploy --prod",

@@ -99,13 +99,40 @@ test('apps: 包含 15 个品牌应用与筛选/排序标记', async () => {
   assert.match(r.text, /data-app-sort/);
 });
 
-test('chats: 包含会话数据、搜索与发送交互标记', async () => {
+test('chats: 包含三栏布局、会话搜索与流式发送交互标记', async () => {
   const r = await srv.request('GET', '/js/modules/chats/module.js');
-  assert.match(r.text, /CONVERSATIONS/);
-  assert.match(r.text, /Alex John/);
-  assert.match(r.text, /data-ch-search/);
-  assert.match(r.text, /data-ch-open/);
-  assert.match(r.text, /data-ch-send-form/);
+  // 三栏结构(左侧会话 / 中部聊天 / 右侧参数面板)
+  assert.match(r.text, /data-chat-root/);
+  assert.match(r.text, /data-chat-left/);
+  assert.match(r.text, /data-chat-main/);
+  assert.match(r.text, /data-chat-right/);
+  // 左侧:模糊搜索 + 会话列表 + 打开会话
+  assert.match(r.text, /data-chat-list-search/);
+  assert.match(r.text, /data-chat-open=/);
+  // 中部:流式消息区 + 气泡动作(复制/编辑/重试/赞成/反对)
+  assert.match(r.text, /data-chat-msgs/);
+  assert.match(r.text, /data-chat-msg-act=/);
+  assert.match(r.text, /msgAction\('copy'/);
+  assert.match(r.text, /msgAction\('edit'/);
+  assert.match(r.text, /msgAction\('retry'/);
+  assert.match(r.text, /msgAction\('good'/);
+  assert.match(r.text, /msgAction\('bad'/);
+  // 思维链 + 工具调用卡片(可展开折叠)
+  assert.match(r.text, /data-chat-thinking=/);
+  assert.match(r.text, /data-chat-tool-card=/);
+  // 输入框:供应商/模型/思考程度/MCP/联网/附件/发送
+  assert.match(r.text, /data-chat-composer/);
+  assert.match(r.text, /data-chat-toggle="mcp"/);
+  assert.match(r.text, /data-chat-toggle="web"/);
+  assert.match(r.text, /data-chat-attach="upload"/);
+  assert.match(r.text, /data-chat-send/);
+  // 右侧:参数设置 / MCP / Agent 三个 tab
+  assert.match(r.text, /data-chat-right-tab=/);
+  assert.match(r.text, /rightTabBtn\('params'/);
+  assert.match(r.text, /rightTabBtn\('mcp'/);
+  assert.match(r.text, /rightTabBtn\('agent'/);
+  assert.match(r.text, /data-chat-fetch-models/);
+  assert.match(r.text, /data-chat-maxtokens/);
 });
 
 test('boot.js: MODULE_DIRS 已切换到新模块并移除占位模块', async () => {
